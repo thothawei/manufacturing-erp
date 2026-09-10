@@ -15,7 +15,8 @@ tests/
   Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
-  ai-assistant-module-plan-v2.md   AI 助理模組規劃（v2）
+  ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
+  ai-assistant-module-plan-v2.md   動工前的設計規劃（歷史）
 ```
 
 Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Application，實作在 `Infrastructure/AI`，
