@@ -209,6 +209,28 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask \
 
 ---
 
+### 3.8 錯誤處理：狀態碼要說對事情
+
+```bash
+curl "http://localhost:5199/api/items/NOT-EXIST/inventory"      # 料號不存在
+curl "http://localhost:5199/api/items/PANEL-01/sufficiency"     # 料號存在但沒有 BOM
+curl "http://localhost:5199/api/mrp/shortages?planningHorizonDays=0"
+```
+
+```json
+{"title":"查無資料","status":404,"detail":"找不到料件：NOT-EXIST"}
+{"title":"無法執行此操作","status":409,"detail":"料件 PANEL-01 沒有 BOM，無法計算可製造量"}
+{"title":"參數錯誤","status":400,"detail":"規劃期間必須大於 0 天 (Parameter 'planningHorizonDays')"}
+```
+
+**看點**：第二個是 409 而不是 404 —— PANEL-01 **存在**，只是它是原物料沒有 BOM，
+拿去問可製造量本來就不適用。這跟「查無此料號」是不同的情況，回傳的狀態碼也該不同。
+
+這一層原本不存在：三個請求全部回 500，而且回應體直接吐出完整堆疊與本機絕對路徑。
+現在未預期的錯誤只回通用訊息，全文進伺服器 log。
+
+---
+
 ## 4. 面試問答
 
 每一題的答案都指得出對應的程式碼或測試 —— 講不出證據的答案不要用。
@@ -254,6 +276,11 @@ LLM 整套換掉、甚至拿掉 AI 助理，Domain 都不該動一行。
 
 錯誤帶結構化 `error_code`，system prompt 逐碼規定該怎麼反應 ——
 `ENTITY_NOT_FOUND` 直接告知查不到，`INVALID_ARGUMENT` 可改參數重試一次，其餘不要重試。
+
+**REST 端點那邊犯過同樣的錯，而且更久才發現。** AI 路徑做了兩輪錯誤處理，
+REST 端點卻完全裸奔 —— 查無料號回 500 並吐出堆疊。現在由 `ErpExceptionHandler`
+統一對映（見 3.8），AI 端點原本自己 try/catch 的 503 也收斂進來，
+避免兩套錯誤處理各說各話。
 
 ### Q：要換成 OpenAI 需要改什麼？
 
