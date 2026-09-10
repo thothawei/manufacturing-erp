@@ -12,7 +12,7 @@
 > - **第 7–8 節的路線圖與工時估算已經走完**，目前進度與後續工作見
 >   `ai-assistant-module-plan-v3.md`。
 >
-> v2 修訂重點（相對 v1）：
+> v2 修訂重點（相對 [v1](ai-assistant-module-plan-v1.md)）：
 > 1. 明訂庫存計算基準為 `available_qty`，並在工具回傳中帶出 `basis` 欄位。
 > 2. `required_per_unit` 更名為 `required_per_finished_unit`，消除多階 BOM 下的語意歧義。
 > 3. 新增 ToolCatalog 與 Application Service 簽章的反射一致性測試（防靜默漂移）。
