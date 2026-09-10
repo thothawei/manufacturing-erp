@@ -5,6 +5,11 @@
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
 使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
 
+![Scalar API 文件](docs/images/scalar-overview.png)
+
+啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
+十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+
 166 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），詳見「尚未處理」。
 
