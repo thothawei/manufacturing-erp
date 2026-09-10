@@ -8,6 +8,7 @@ using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Persistence.Repositories;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Erp.Infrastructure.Tests;
 
@@ -36,6 +37,7 @@ internal static class TestServices
                 workOrderRepository, itemRepository, inventoryRepository,
                 purchaseOrderRepository, bomExplosionService, clock),
             new PurchasingQueryService(purchaseOrderRepository),
-            new QualityInspectionQueryService(new QualityInspectionRepository(db)));
+            new QualityInspectionQueryService(new QualityInspectionRepository(db)),
+            NullLogger<ToolDispatcher>.Instance);
     }
 }

@@ -11,6 +11,7 @@ using Erp.Application.Production;
 using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Erp.Infrastructure.AI;
 
@@ -28,7 +29,8 @@ public sealed class ToolDispatcher(
     WorkOrderRiskService workOrderRiskService,
     MrpCalculationService mrpCalculationService,
     PurchasingQueryService purchasingQueryService,
-    QualityInspectionQueryService qualityInspectionQueryService)
+    QualityInspectionQueryService qualityInspectionQueryService,
+    ILogger<ToolDispatcher> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -100,6 +102,28 @@ public sealed class ToolDispatcher(
         catch (InvalidOperationException ex)
         {
             return Error(ex.Message);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 呼叫端主動取消（使用者關掉連線、請求逾時）不是工具故障，原樣往上拋
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 未預期的例外（資料庫連線失效、序列化失敗等）如果放它往上竄，
+            // 會穿過 tool-use 迴圈變成 HTTP 500，整段對話跟著陣亡 ——
+            // 即使其他工具的結果其實是好的。
+            // 這裡把它降級成單一工具的失敗，讓 LLM 據實回報這項查不到。
+            //
+            // 例外全文只進伺服器 log，回給 LLM 的訊息不含型別、堆疊或任何內部細節：
+            // 那些對 LLM 沒有用，還可能被它轉述給使用者。
+            // 參數要用同一組序列化設定輸出，JsonElement.ToString() 會把中文逃逸成
+            // \uXXXX，log 是給人看的，那樣根本讀不出來是查了什麼
+            logger.LogError(ex,
+                "工具 {ToolName} 執行時發生未預期的例外，參數：{Arguments}",
+                toolName, JsonSerializer.Serialize(arguments, JsonOptions));
+
+            return Error("查詢時發生系統錯誤，這項資料目前查不到。");
         }
     }
 

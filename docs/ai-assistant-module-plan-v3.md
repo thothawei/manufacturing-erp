@@ -93,18 +93,34 @@
 
 | # | 工作 | 產出 | 估計 |
 |---|---|---|---|
-| G1 | `ToolDispatcher` 加上總括的例外攔截：記錄伺服器端 log（含例外全文），回 LLM 通用錯誤，絕不外洩堆疊 | 一個 catch-all 分支 + 測試（注入會拋例外的假服務，驗證迴圈不中斷） | 小 |
+| ~~G1~~ | ~~`ToolDispatcher` 加上總括的例外攔截~~ **已完成** | 見下方 3.1.1 | — |
 | G2 | 錯誤回傳改為 `{ "error_code": "...", "message": "..." }`，錯誤碼列舉化 | `ToolErrorCode` + 既有錯誤測試改斷言錯誤碼 | 小 |
 | G3+G4 | system prompt 補兩條：超出範圍禮貌拒答、同一工具失敗不重試超過一次 | 更新 `AiSystemPrompt` | 極小 |
 | G5 | log 補上輸入參數與耗時，改成結構化欄位 | `AiAssistantService` 的 log 呼叫 + `Stopwatch` | 小 |
 | G6 | 支援 `dotnet user-secrets`，README 補本機設定步驟 | `Program.cs` 一行 + 文件 | 極小 |
 
-合計約 1 次工作階段。
+剩餘（G2–G6）合計約 1 次工作階段。
 
-**G1 的補充說明**：目前 `catch` 只涵蓋 `EntityNotFoundException`、`ArgumentException`、
-`InvalidOperationException`。資料庫連線失敗這類例外會穿過 `ToolDispatcher`、穿過 tool-use 迴圈，
-一路變成 HTTP 500。正確行為是把它變成一個 `is_error` 的 tool_result，讓 LLM 告訴使用者
-「這項查詢失敗了」，其他工具的結果仍然有用。
+### 3.1.1 G1 已完成
+
+`ToolDispatcher` 現在有總括的例外攔截：未預期例外降級成單一工具的失敗，
+例外全文只進伺服器 log，回給 LLM 的訊息不含型別、堆疊或任何內部細節。
+`OperationCanceledException` 在呼叫端主動取消時原樣往上拋 —— 那代表「這次對話不用做了」，
+不該被降級成一個 tool_result 讓迴圈繼續跑。
+
+六條測試涵蓋，用的是真實的資料庫連線失效（關掉 in-memory SQLite 連線）而不是 mock：
+
+- 資料庫失效時回報錯誤而不是把例外往上拋
+- 回給 LLM 的訊息不含例外型別、堆疊或內部細節
+- 例外全文（含參數）寫進伺服器 log
+- 八個工具全部走一遍，確認每一個都被攔下
+- 呼叫端主動取消時例外往上拋
+- **一個工具炸掉時，同一輪其他工具的結果仍然送達 LLM** —— 這是 G1 真正的價值
+
+反向驗證：移除總括攔截會紅 4 條，只拿掉取消的 filter 會紅 1 條。
+
+順帶修掉一個同源問題：log 裡的參數原本用 `JsonElement.ToString()` 輸出，
+會把中文逃逸成 `\uXXXX`。log 是給人看的，那樣根本讀不出來查了什麼，改用同一組序列化設定。
 
 ### 3.2 需要你拍板的兩個決策
 
