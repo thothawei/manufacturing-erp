@@ -28,6 +28,22 @@ AI 助理設定：模型 claude-opus-5，工具迴圈上限 5 輪，逾時 60 �
 dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ```
 
+金鑰存在專案外（`~/.microsoft/usersecrets/`），不可能被誤 commit —— 這個 repo 是公開的。
+
+### 開發時的三個指令
+
+```bash
+dotnet test                          # 166 個測試
+dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
+dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
+```
+
+三者都由 GitHub Actions 在每次 push 與 PR 上執行（Release 組態）。
+格式規範是 C# 4 空格、專案檔與 JSON/YAML 2 空格、統一 LF 換行；
+Markdown 不砍行尾空白（那是換行語法），EF 產生的 migration 標記為 generated code 不套用規範。
+
+**加上格式檢查的理由**：沒有 CI 驗證的話，`.editorconfig` 只是一份建議而不是規範。
+
 ---
 
 ## 2. 展示資料的結構
@@ -257,12 +273,27 @@ EF Core 開的連線，原生 SQL 查同一個檔案會退回字典序。
 | 未預期例外的總括攔截 | 紅 4 條 |
 | 錯誤的 `error_code` 欄位 | 紅 13 條 |
 | 稽核 log | 紅 5 條 |
+| 灌種子資料的併發容忍 | 紅 2 條（3 次執行都紅，錯誤訊息與原始 flaky 一致） |
 
 沒有紅的測試等於沒有測試。**這個習慣抓到過一次我自己的錯誤**：
 架構測試第一次反向驗證是綠的，我一度以為測試無效，深挖後發現是實驗寫錯了
 （`nameof` 不產生型別參考），改用 `typeof` 就紅了。
 
 ### Q：開發過程中最有價值的 bug 是哪個？
+
+**一個 flaky 測試，症狀是「每個 build 組態的第一次執行才失敗」。**
+錯誤是 `UNIQUE constraint failed: bom_lines...`。重跑五次都通過，很容易就當成環境雜訊放過。
+
+根因是灌種子資料不具備併發安全：`WebApplicationFactory` 會建立 host 不只一次，
+冷啟動時兩次 seeding 真正重疊，雙方都通過了「是否已有資料」的檢查；
+熱身之後第一次太快完成，第二次就只看到資料而跳過 —— 這就是為什麼只有第一次會炸。
+
+**調查過程中我犯過一個錯**：第一次寫的併發測試顯示「併發 seeding 成功」，
+差點就據此排除這個方向。但那個測試用 in-memory SQLite —— 共用單一連線，
+寫入天然被序列化，根本測不出併發。改用檔案 SQLite 才重現得出來。
+這件事的教訓是：**測試環境與真實環境的差異本身就會製造偽陰性**。
+
+這也不只是測試問題 —— 多個 API 實例同時啟動時，生產環境是一模一樣的競態。
 
 **MRP 漏算逾期工單。** 加端到端測試時，用種子資料算出來的毛需求跟我預期的數字對不上。
 第一反應是測試寫錯，但追下去發現是實作的問題：查詢起點用「今天」，
@@ -288,3 +319,10 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
   注入呼叫者身分並下推到查詢服務。
 - **MRP 沒有時間分桶**：同一料號的需求日取最早的那張工單，建議採購會偏保守。
 - **BOM 展開是逐階查詢**，深層 BOM 會放大成本。正解是遞迴 CTE，目前資料量下不構成問題。
+
+---
+
+## 6. 授權
+
+[MIT](../LICENSE)。著作權人是 repo 擁有者，程式碼可自由使用、修改與再散布，
+但不附任何擔保。原始碼在 https://github.com/thothawei/manufacturing-erp
