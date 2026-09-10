@@ -1,3 +1,4 @@
+using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Erp.Infrastructure.Tests;

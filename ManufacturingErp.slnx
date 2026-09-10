@@ -6,6 +6,7 @@
     <Project Path="src/Erp.Infrastructure/Erp.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Erp.Api.Tests/Erp.Api.Tests.csproj" />
     <Project Path="tests/Erp.Application.Tests/Erp.Application.Tests.csproj" />
     <Project Path="tests/Erp.ArchitectureTests/Erp.ArchitectureTests.csproj" />
     <Project Path="tests/Erp.Infrastructure.Tests/Erp.Infrastructure.Tests.csproj" />

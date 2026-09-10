@@ -1,3 +1,4 @@
+using Erp.Api.ErrorHandling;
 using Erp.Application;
 using Erp.Application.Abstractions;
 using Erp.Application.Bom;
@@ -33,9 +34,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
+
+// 例外 → HTTP 狀態碼的統一對映。沒有這層時查無料號會回 500 並洩漏堆疊
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ErpExceptionHandler>();
 builder.Services.AddAiAssistant(builder.Configuration);
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 // 開發環境自動建表並灌入展示資料；正式環境應改為明確的部署步驟
 if (app.Environment.IsDevelopment())
@@ -64,16 +71,9 @@ app.MapPost("/api/ai-assistant/ask", async (
             return Results.BadRequest(new { error = "question 不可為空" });
         }
 
-        try
-        {
-            var answer = await assistant.AskAsync(request.Question, ct);
-            return Results.Ok(new { answer });
-        }
-        catch (LlmUnavailableException ex)
-        {
-            // AI 服務不可用是外部依賴問題，回 503 而不是 500，訊息也不帶 SDK 內部細節
-            return Results.Problem(title: "AI 助理暫時無法使用", detail: ex.Message, statusCode: 503);
-        }
+        // LlmUnavailableException 由 ErpExceptionHandler 統一對映成 503
+        var answer = await assistant.AskAsync(request.Question, ct);
+        return Results.Ok(new { answer });
     });
 
 // 以下端點目前是給人驗證資料層用的；Phase 2 的 AI 助理會改用同一批 Application 服務

@@ -3,7 +3,7 @@
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
 使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
 
-150 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
+166 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），詳見「尚未處理」。
 
 | 想看什麼 | 去哪裡 |
@@ -23,6 +23,7 @@ src/
 tests/
   Erp.Application.Tests      Application 層單元測試（以 in-memory 假 Repository 驅動）
   Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
+  Erp.Api.Tests              HTTP 端點測試（例外 → 狀態碼對映）
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
   demo-and-interview.md            展示腳本與面試問答
@@ -178,9 +179,29 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 未預期例外另外記一筆 `Error`，含例外全文；回給 LLM 的內容則不含任何內部細節。
 
+## API 錯誤處理
+
+`ErpExceptionHandler` 把 Application 層的例外對映成語意正確的狀態碼。
+沒有這一層時，查無料號會回 500，而且回應體直接吐出完整堆疊與本機絕對路徑。
+
+| 例外 | 狀態碼 |
+|---|---|
+| `EntityNotFoundException` | 404 |
+| `ArgumentException`（含 `ArgumentOutOfRangeException`） | 400 |
+| `InvalidOperationException` | 409（參數合法但操作不適用，如對原物料問可製造量） |
+| `LlmUnavailableException` | 503 |
+| 其他 | 500，回應只有通用訊息，全文進伺服器 log |
+
 ## 實作時踩到的坑
 
 依「發現時的代價」排序。每一條都是測試或實測抓到的，不是事後回想。
+
+**灌種子資料不是併發安全的**（真 bug，flaky 測試追出來的）：API 測試出現「每個 build
+組態的第一次執行才失敗」的怪症狀，錯誤是 `UNIQUE constraint failed: bom_lines...`。
+根因是 `WebApplicationFactory` 會建立 host 不只一次，冷啟動時兩次 seeding 真正重疊，
+雙方都通過了「是否已有資料」的檢查；熱身後第一次太快完成，第二次就只看到資料而跳過。
+第一次寫的併發測試沒抓到，因為它用 in-memory SQLite —— 共用單一連線，寫入天然被序列化。
+改用檔案 SQLite 才重現得出來。這不只是測試問題：多個 API 實例同時啟動時，生產環境是同一個競態。
 
 **MRP 漏算逾期工單**（真 bug）：查詢起點原本用「今天」，把交期已過但還沒做完的工單
 整批擋掉了 —— 那些工單仍然要料，而且是最急的需求。用假 Repository 測不出來，
@@ -211,12 +232,13 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
 
 ## 測試策略
 
-150 個測試，分三個專案：
+166 個測試，分四個專案：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
 | `Erp.Infrastructure.Tests` | 100 | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic wire format |
+| `Erp.Api.Tests` | 13 | HTTP 端點的錯誤對映與正常路徑（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 7 | 分層邊界 |
 
 幾個值得一提的：

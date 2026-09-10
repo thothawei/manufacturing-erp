@@ -23,6 +23,33 @@ public static class ErpDbSeeder
 {
     public static async Task SeedAsync(ErpDbContext db, IClock clock, CancellationToken ct = default)
     {
+        try
+        {
+            await SeedCoreAsync(db, clock, ct);
+        }
+        catch (DbUpdateException)
+        {
+            // 失敗的批次還掛在 ChangeTracker 上，不清掉的話接下來的查詢會看到它們
+            db.ChangeTracker.Clear();
+
+            if (!await db.Items.AnyAsync(ct))
+            {
+                throw;   // 資料真的沒進去，那是別的問題，不要吞掉
+            }
+
+            // 另一個執行緒或實例正在灌同一份資料，兩邊都通過了「是否已有資料」的檢查。
+            // 檢查與插入之間本來就有空窗，SQLite 的交易也擋不住（deferred 交易的讀取不取寫鎖），
+            // 所以改成讓衝突發生、確認資料確實已經在了，就當作成功。
+            //
+            // 這不只是測試問題：多個 API 實例同時啟動時，生產環境會遇到一模一樣的競態。
+            // WebApplicationFactory 會建立 host 不只一次，測試冷啟動時兩次 seeding 真正重疊，
+            // 熱身之後第一次太快完成、第二次就只會看到資料而跳過 —— 這就是它表現成
+            // 「每個 build 組態的第一次執行才失敗」的原因。
+        }
+    }
+
+    private static async Task SeedCoreAsync(ErpDbContext db, IClock clock, CancellationToken ct)
+    {
         if (await db.Items.AnyAsync(ct))
         {
             return; // 已有資料就不重複灌，可安全重複呼叫

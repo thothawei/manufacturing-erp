@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # 不限定 base 分支：限定的話，針對非 main 分支開的 PR 會靜默不跑 CI
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 還原相依套件
+        run: dotnet restore
+
+      - name: 建置（警告視為錯誤）
+        run: dotnet build --no-restore --configuration Release -warnaserror
+
+      - name: 執行全部測試
+        run: dotnet test --no-build --configuration Release --verbosity normal
