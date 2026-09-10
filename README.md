@@ -1,5 +1,7 @@
 # 製造業 ERP 系統
 
+[![CI](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml)
+
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
 使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
 
