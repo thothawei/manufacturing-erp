@@ -15,7 +15,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 
 | 想看什麼 | 去哪裡 |
 |---|---|
-| 三十秒跑起來、實際輸出、面試問答 | [`docs/demo-and-interview.md`](docs/demo-and-interview.md) |
+| 三十秒跑起來、實際輸出、常見問答 | [`docs/demo-and-interview.md`](docs/demo-and-interview.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
 | 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
@@ -37,7 +37,7 @@ tests/
   Erp.Api.Tests              HTTP 端點測試（例外 → 狀態碼對映）
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
-  demo-and-interview.md            展示腳本與面試問答
+  demo-and-interview.md            展示腳本與常見問答
   ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
   ai-assistant-module-plan-v2.md   設計規範：工具契約、庫存基準、防幻覺機制
   ai-assistant-module-plan-v1.md   最初的規劃（動工前，保持原貌）
@@ -296,7 +296,7 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 ### 每條防線都做過反向驗證
 
 把防線拔掉、確認測試會紅，再還原。沒有紅過的測試等於沒有測試。
-八條防線的驗證結果列在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md) 的面試問答一節。
+八條防線的驗證結果列在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
 
 這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
 深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
