@@ -18,8 +18,20 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 **展示時從這裡開始**：http://localhost:5199/scalar/v1
 
-互動式 API 文件（Scalar），十個端點都有中文說明與參數型別，可以直接在瀏覽器裡按
-Test Request 試打。下面第 3 節的 curl 都可以改用這個介面操作，對方不必看終端機。
+![Scalar API 文件首頁](images/scalar-overview.png)
+
+互動式 API 文件（Scalar）。左側是十個端點的中文清單，主頁說明了這個系統在做什麼，
+以及兩個最容易答錯的地方 —— 可用庫存與帳上庫存的差別、多階 BOM 用量的分母。
+
+點進任一端點，會看到中文說明、參數型別、curl 範例，以及一個可以直接試打的 Test Request：
+
+![AI 助理端點的詳細說明](images/scalar-ai-endpoint.png)
+
+端點說明刻意不只寫「這個端點做什麼」，也寫清楚使用上的陷阱 ——
+例如 AI 助理這條寫明「一次請求內部會有多輪 LLM 與工具的往返，但不保存跨請求的對話記憶」，
+因為那正是最常被誤解的地方。
+
+下面第 3 節的 curl 都可以改用這個介面操作，展示時對方不必看終端機。
 
 啟動時會印出 AI 助理的生效設定：
 
