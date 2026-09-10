@@ -90,11 +90,14 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ## AI 助理
 
-需要 Anthropic API 金鑰。本機開發用 user-secrets（不會進版控）：
+需要 Anthropic API 金鑰。本機開發用 user-secrets（存在專案外，不可能被誤 commit）：
 
 ```bash
 dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ```
+
+macOS 上也可以先把金鑰複製到剪貼簿，再執行 `./scripts/set-api-key.sh` ——
+它會檢查前綴與長度後才寫入，避免把錯的東西存進去（金鑰不會顯示在畫面或 shell history）。
 
 或用環境變數（正式環境的做法）：
 
