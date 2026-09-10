@@ -43,10 +43,6 @@ Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Applicatio
 
 依賴方向固定為 `Api → Infrastructure → Application → Domain`，Domain 不知道上層存在。
 
-## 授權
-
-[MIT](LICENSE)
-
 ## 開發環境
 
 需要 .NET 10 SDK。本機以 Homebrew 安裝時要設定：
@@ -228,9 +224,17 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 整批擋掉了 —— 那些工單仍然要料，而且是最急的需求。用假 Repository 測不出來，
 因為 fake 跟真 Repository 有同樣的過濾邏輯；是端到端測試對不上數字才追出來的。
 
+**REST 端點完全沒有例外處理**：查無料號、查無工單、對原物料問可製造量、規劃天數為 0，
+全部回 500，而且回應體直接吐出完整堆疊與本機絕對路徑。語意也錯 —— 查不到資料是 404 不是 500。
+諷刺的是 AI 路徑上做了兩輪錯誤處理，REST 端點卻裸奔。修法見「API 錯誤處理」。
+
 **未預期例外會炸掉整段對話**：`ToolDispatcher` 原本只攔三類已知例外，資料庫連線失效
 會穿過 tool-use 迴圈變成 HTTP 500，即使同一輪其他工具的結果是好的也一起陣亡。
 現在降級成單一工具的失敗。
+
+**架構測試擋不住 Domain 引入 LLM SDK**：測試寫好了，反向驗證卻是綠的，一度以為測試無效。
+真正的原因有兩層 —— 第一次的實驗用 `nameof` 寫（編譯期常數，不留型別參考，等於空實驗），
+改掉之後才發現 NetArchTest 本身也擋不住。細節見「架構邊界」。
 
 **EF Core 翻不動計算屬性**：`WorkOrder.IsOpen` 是 C# 計算屬性，寫在 `Where` 裡
 會直接擲例外。抽出 `WorkOrderStatuses.Open` 當單一定義，讓記憶體判斷與 SQL 查詢共用。
@@ -247,6 +251,16 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
 **數量帶著沒有意義的小數尾巴**：SQLite 的 round-trip 會保留小數位數，`30m` 存進去
 再取出變成 `30.0`。LLM 可能照抄成「短少 120.0 件」，每個數字也多花 token。
 `NormalizedDecimalConverter` 去掉無意義的尾隨零，AI 工具與 REST 端點共用。
+
+**我把 SQLite 的限制寫錯了，差點做出一條保護不存在問題的測試**：文件與註解原本寫
+「decimal 存成 TEXT，資料庫層無法正確比較或排序」，那是從 EF Core 常識推來的、沒實測就寫下。
+決定維持 SQLite 後要為這條約束加保護測試，動手前先實測 —— 結果比較、排序、加總全部正確，
+EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMAL` collation。
+那條約束不存在。改成 `SqliteDecimalBehaviourTests` 釘住真實行為，詳見「SQLite 的 decimal」。
+
+**逐筆查詢的 N+1**：MRP 與工單風險判定在迴圈裡逐個料號查採購單與補料條件。
+用假 Repository 完全看不出來，接上真資料庫才成為問題。判準用「查詢次數如何隨料號數成長」
+而不是絕對次數 —— 絕對次數會隨 BOM 結構改變，斷言它只會製造脆弱的測試。
 
 **工具參數不是單一 JSON 值**：`BetaToolUseBlockParam.Input` 的型別是屬性字典，
 把 `JsonElement` 直接丟進去編不過，回送 tool_use 時要展開。
@@ -354,3 +368,7 @@ ORDER BY "i"."OnHandQty" COLLATE EF_DECIMAL
 查同一個檔案時，TEXT 會退回字典序比較，`"9"` 會大於 `"100"`。所以原生 SQL 不要碰數量欄位的比較與排序。
 
 另外 round-trip 會保留小數位數（`30m` 存進去讀出來變 `30.0`），由 `NormalizedDecimalConverter` 處理。
+
+## 授權
+
+[MIT](LICENSE)
