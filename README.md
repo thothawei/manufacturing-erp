@@ -35,7 +35,7 @@ tests/
 docs/
   demo-and-interview.md            展示腳本與面試問答
   ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
-  ai-assistant-module-plan-v2.md   動工前的設計規劃（歷史）
+  ai-assistant-module-plan-v2.md   設計規範：工具契約、庫存基準、防幻覺機制
 ```
 
 Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Application，實作在 `Infrastructure/AI`，
