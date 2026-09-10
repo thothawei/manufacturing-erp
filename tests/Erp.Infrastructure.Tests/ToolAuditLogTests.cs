@@ -16,7 +16,7 @@ namespace Erp.Infrastructure.Tests;
 /// 工具呼叫的稽核紀錄。
 ///
 /// AI 助理最後只吐出一段自然語言，沒有這條 log 就無從得知那段話是根據哪些查詢組出來的。
-/// 這也是面試時要展示「整個過程可追蹤、不是黑箱」的依據。
+/// 這也是「整個過程可追蹤、不是黑箱」的依據。
 public class ToolAuditLogTests : IAsyncLifetime
 {
     private static readonly DateOnly Today = new(2026, 9, 10);

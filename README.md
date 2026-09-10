@@ -15,7 +15,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 
 | 想看什麼 | 去哪裡 |
 |---|---|
-| 三十秒跑起來、實際輸出、常見問答 | [`docs/demo-and-interview.md`](docs/demo-and-interview.md) |
+| 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
 | 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
@@ -37,7 +37,7 @@ tests/
   Erp.Api.Tests              HTTP 端點測試（例外 → 狀態碼對映）
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
-  demo-and-interview.md            展示腳本與常見問答
+  demo-and-design-notes.md         展示腳本與設計問答
   ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
   ai-assistant-module-plan-v2.md   設計規範：工具契約、庫存基準、防幻覺機制
   ai-assistant-module-plan-v1.md   最初的規劃（動工前，保持原貌）
@@ -88,7 +88,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成；**尚未對真實 API 驗證過**（見下方） |
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
 | Phase 3.5 — 規劃對帳後補齊的缺口（錯誤處理、錯誤碼、稽核 log、user-secrets） | 完成 |
-| Phase 4 — 展示準備 | 完成（`docs/demo-and-interview.md`）；真實 API 驗證待金鑰 |
+| Phase 4 — 展示準備 | 完成（`docs/demo-and-design-notes.md`）；真實 API 驗證待金鑰 |
 
 ### 八個 Application 服務（AI 工具背後真正做事的地方）
 
@@ -296,7 +296,7 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 ### 每條防線都做過反向驗證
 
 把防線拔掉、確認測試會紅，再還原。沒有紅過的測試等於沒有測試。
-八條防線的驗證結果列在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
+八條防線的驗證結果列在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
 
 這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
 深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
@@ -318,7 +318,7 @@ NetArchTest 檢查的是 `Erp.*` 命名空間，對外部套件無感。實測�
 ## 展示資料
 
 `ErpDbSeeder` 灌入的情境所有日期與單號都以執行當天為基準相對產生，資料不會過期。
-完整的展示腳本與每個數字的看點在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
+完整的展示腳本與每個數字的看點在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
 
 產品結構：
 

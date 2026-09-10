@@ -26,7 +26,7 @@ public sealed record ShortageAnalysisResult(
 /// MRP 缺料試算：把規劃期間內所有未結案工單的剩餘產量展開成原料需求，
 /// 扣掉可用庫存與能及時到貨的在途採購，剩下的就是要補的量。
 ///
-/// 假設（面試時要能說明）：工單的物料需求尚未反映在 InventoryBalance.ReservedQty 上。
+/// 假設（要說得出理由）：工單的物料需求尚未反映在 InventoryBalance.ReservedQty 上。
 /// 若工單已實際發料，本算法會高估需求量——方向偏保守（寧可多買也不缺料），
 /// 但正式版本應改為「只計算尚未保留的部分」。
 public sealed class MrpCalculationService(

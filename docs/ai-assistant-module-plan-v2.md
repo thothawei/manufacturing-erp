@@ -8,7 +8,7 @@
 > - **第 5 節的範例數字是規劃時的示意，與實際種子資料不同**：
 >   範例 1 寫最多可做 42 台，實際是 40 台；範例 2 寫淨缺料 120 片，實際是 130 片
 >   （種子資料多了一張逾期工單，貢獻 10 片需求）。
->   實際會跑出來的數字見 `demo-and-interview.md`。
+>   實際會跑出來的數字見 `demo-and-design-notes.md`。
 > - **第 7–8 節的路線圖與工時估算已經走完**，目前進度與後續工作見
 >   `ai-assistant-module-plan-v3.md`。
 >
@@ -74,9 +74,9 @@
 
 ### 1.2 為什麼這樣切
 
-- **Domain 零污染**：BOM、工單、庫存這些核心規則以後就算把 LLM 整套換掉（甚至拿掉 AI 助理），Domain 完全不用動，這也是面試被問「為什麼這樣分層」時講得出道理的地方。
+- **Domain 零污染**：BOM、工單、庫存這些核心規則以後就算把 LLM 整套換掉（甚至拿掉 AI 助理），Domain 完全不用動，這也是被問「為什麼這樣分層」時講得出道理的地方。
 - **Application 只認介面，不認 LLM**：`IAiAssistantService` 定義在 Application，實作在 Infrastructure，這跟現有的 `IWorkOrderRepository` 之類的依賴反轉模式完全一致，架構風格統一，不是為了 AI 另開一套規則。
-- **AI 只能「唯讀查詢」，不能「異動資料」**：目前規劃的所有 Tool 都只呼叫查詢類服務，沒有一個工具會寫入資料庫。這是刻意的設計限制，可以在面試時清楚說明「AI 助理目前只做查詢與建議摘要，不具備下單/扣庫存等寫入權限」，降低幻覺風險也降低系統風險。
+- **AI 只能「唯讀查詢」，不能「異動資料」**：目前規劃的所有 Tool 都只呼叫查詢類服務，沒有一個工具會寫入資料庫。這是刻意的設計限制，可以清楚說明「AI 助理目前只做查詢與建議摘要，不具備下單/扣庫存等寫入權限」，降低幻覺風險也降低系統風險。
 - **不讓 LLM 自己組 SQL**：所有工具都是「呼叫既有 Application Service 方法」，回傳結構化 JSON，LLM 拿到的永遠是後端算好的數字，不會有 LLM 自己拼 SQL 字串或自己做四則運算後謊報數字的空間。
 
 ---
@@ -188,7 +188,7 @@ v1 原本命名為 `required_per_unit`，在單階 BOM 下兩種解讀剛好同�
 | 限制 | 影響 | 處理方式 |
 |---|---|---|
 | **單輪對話，無上下文** | API 契約是 `{question} → {answer}`，無對話歷史。使用者追問「那 SUP-008 上次交期準嗎」時，AI 不知道 SUP-008 從何而來 | 明列為已知限制。擴充點：`AskAsync` 已預留可加入 `conversation_id` 參數，Phase 3 視時間決定是否實作（伺服器端存放訊息歷史即可，不需改動 Tool 層） |
-| **無使用者權限 / 租戶隔離** | AI 雖唯讀，但查得到全庫資料，任何登入者都能問到所有工單與成本相關資訊 | 目前定位為單一公司內部工具，不做多租戶。若面試被問到，說明擴充方式是在 `ToolDispatcher` 注入呼叫者身分並下推至查詢服務 |
+| **無使用者權限 / 租戶隔離** | AI 雖唯讀，但查得到全庫資料，任何登入者都能問到所有工單與成本相關資訊 | 目前定位為單一公司內部工具，不做多租戶。被問到時，說明擴充方式是在 `ToolDispatcher` 注入呼叫者身分並下推至查詢服務 |
 | **LLM 呼叫無成本控管** | 未記錄 token 用量、無逾時與重試策略 | Phase 2 在 `AnthropicLlmClient` 實作逾時與有限次重試；token 用量記錄為 Phase 3 選配 |
 
 ---
@@ -201,7 +201,7 @@ v1 原本命名為 `required_per_unit`，在單階 BOM 下兩種解讀剛好同�
 | Phase 1 | 補齊 AI 模組依賴的查詢類服務：多階 BOM 展開（`BomExplosionService`）、工單風險判定（`WorkOrderRiskService`）、MRP 缺料試算（`MrpCalculationService`）、採購單查詢（`PurchasingQueryService`）、品管摘要查詢（`QualityInspectionQueryService`） | 這五個是 AI 工具背後真正做計算/查詢的邏輯，AI 只是包一層介面去呼叫，所以要先在 Application（+ 必要的 Domain 實體）做出來並寫好單元測試 |
 | Phase 2 | AI 基礎建設打通：`Infrastructure.AI`（`AnthropicLlmClient`、`ToolCatalog`、`ToolDispatcher`、tool-use 迴圈）、`IAiAssistantService` 介面、API endpoint | 先只接 1–2 個工具（`search_items` + `get_item_inventory_status`）打通端到端流程 |
 | Phase 3 | 補完剩餘工具、防幻覺機制與測試 | 補齊全部 8 個工具、system prompt 調校、工具呼叫失敗的錯誤處理、mock LLM 測試、架構測試、ToolCatalog 一致性測試 |
-| Phase 4 | 面試展示準備 | 示範對話腳本、curl/Postman 範例、README 說明架構決策 |
+| Phase 4 | 展示準備 | 示範對話腳本、curl/Postman 範例、README 說明架構決策 |
 
 ---
 
