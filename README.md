@@ -1,6 +1,16 @@
 # 製造業 ERP 系統
 
-Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理模組（規劃中）。
+Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
+使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
+
+150 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
+發過請求（開發機沒有金鑰），詳見「尚未處理」。
+
+| 想看什麼 | 去哪裡 |
+|---|---|
+| 三十秒跑起來、實際輸出、面試問答 | [`docs/demo-and-interview.md`](docs/demo-and-interview.md) |
+| 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
+| 架構決策與踩過的坑 | 本文件以下各節 |
 
 ## 專案結構
 
@@ -54,9 +64,10 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 1 — AI 工具背後的查詢／計算服務 | 完成，含 EF Core 資料層與種子資料 |
 | Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成；**尚未對真實 API 驗證過**（見下方） |
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
+| Phase 3.5 — 規劃對帳後補齊的缺口（錯誤處理、錯誤碼、稽核 log、user-secrets） | 完成 |
 | Phase 4 — 展示準備 | 完成（`docs/demo-and-interview.md`）；真實 API 驗證待金鑰 |
 
-### Phase 1 已完成的服務
+### 八個 Application 服務（AI 工具背後真正做事的地方）
 
 | 服務 | 職責 |
 |---|---|
@@ -71,13 +82,13 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ## 三個必須知道的計算約定
 
-這三條寫死在程式碼與測試裡，改動前先看 `docs/ai-assistant-module-plan-v2.md`：
+這三條寫死在程式碼與測試裡，改動前先看 [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md)：
 
 1. **可行性計算一律以 `AvailableQty`（帳上 − 已保留）為基準**，不使用帳上庫存。用帳上庫存會把別張工單保留的料重複計入，導致「系統說夠、現場缺料」。
 2. **`RequiredPerFinishedUnit` 的分母是最終成品一個單位**，多階 BOM 的中間階用量會逐層累乘。例如 `TV-100 → CHASSIS-02 ×3 → SCREW-05 ×4`，螺絲對成品的用量是 12 而不是 4。
 3. **BOM 展開一律展到葉節點原料，不動用半成品既有庫存。** 這會低估可製造量但不會高估，對交期判斷是安全方向。
 
-## AI 助理（Phase 2）
+## AI 助理
 
 需要 Anthropic API 金鑰。本機開發用 user-secrets（不會進版控）：
 
@@ -164,19 +175,66 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 未預期例外另外記一筆 `Error`，含例外全文；回給 LLM 的內容則不含任何內部細節。
 
-### 三個實作上踩到的點
+## 實作時踩到的坑
 
-**中文逃逸**：SDK 內部用預設 JSON 編碼器，會把中文逃逸成 `\uXXXX`。系統提示詞、
-工具說明、使用者問題都是中文，實測請求體積變成 2.28 倍（2038 → 893 字元），
-而工具說明每一輪都重送。SDK 沒有序列化設定點，因此用 `DelegatingHandler`
-在送出前重新序列化一次，JSON 語意不變。`AnthropicWireFormatTests` 守住這條。
+依「發現時的代價」排序。每一條都是測試或實測抓到的，不是事後回想。
+
+**MRP 漏算逾期工單**（真 bug）：查詢起點原本用「今天」，把交期已過但還沒做完的工單
+整批擋掉了 —— 那些工單仍然要料，而且是最急的需求。用假 Repository 測不出來，
+因為 fake 跟真 Repository 有同樣的過濾邏輯；是端到端測試對不上數字才追出來的。
+
+**未預期例外會炸掉整段對話**：`ToolDispatcher` 原本只攔三類已知例外，資料庫連線失效
+會穿過 tool-use 迴圈變成 HTTP 500，即使同一輪其他工具的結果是好的也一起陣亡。
+現在降級成單一工具的失敗。
+
+**EF Core 翻不動計算屬性**：`WorkOrder.IsOpen` 是 C# 計算屬性，寫在 `Where` 裡
+會直接擲例外。抽出 `WorkOrderStatuses.Open` 當單一定義，讓記憶體判斷與 SQL 查詢共用。
+
+**請求訊息共用可變 List**：`AiAssistantService` 把同一個 `List` 的參考傳進 `LlmRequest`，
+之後還會往裡面 Add —— 任何暫存請求的實作（重試、記錄、批次）事後讀到的都是被竄改的內容。
+只有加了會回頭檢查歷史請求的測試才抓得到。
+
+**SDK 把中文逃逸成 `\uXXXX`**：系統提示詞、工具說明、使用者問題都是中文，
+實測請求體積變成 2.28 倍（2038 → 893 字元），而工具說明每一輪都重送。
+SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列化。
+同一個問題在 log 也踩了一次 —— log 是給人看的，`\u9762` 讀不出來查了什麼。
+
+**數量帶著沒有意義的小數尾巴**：SQLite 的 round-trip 會保留小數位數，`30m` 存進去
+再取出變成 `30.0`。LLM 可能照抄成「短少 120.0 件」，每個數字也多花 token。
+`NormalizedDecimalConverter` 去掉無意義的尾隨零，AI 工具與 REST 端點共用。
 
 **工具參數不是單一 JSON 值**：`BetaToolUseBlockParam.Input` 的型別是屬性字典，
 把 `JsonElement` 直接丟進去編不過，回送 tool_use 時要展開。
 
-**數量帶著沒有意義的小數尾巴**：SQLite 把 decimal 存成 TEXT，讀回來會保留原本的小數位數，
-於是 `30m` 存進去再取出變成 `30.0`。LLM 可能照抄成「短少 120.0 件」，每個數字也多花 token。
-`NormalizedDecimalConverter` 在序列化時去掉無意義的尾隨零，AI 工具與 REST 端點共用。
+## 測試策略
+
+150 個測試，分三個專案：
+
+| 專案 | 數量 | 涵蓋 |
+|---|---|---|
+| `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 100 | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic wire format |
+| `Erp.ArchitectureTests` | 7 | 分層邊界 |
+
+幾個值得一提的：
+
+- **`ToolCatalogConsistencyTests`** — 工具的 JSON Schema 是手寫的，`ToolDispatcher` 用字串
+  比對參數名，兩邊漂掉時 C# 編譯不會失敗。這組測試走訪目錄裡每個工具，
+  **連選填參數都真的帶進去執行一次**（只測必填的話，選填參數改名不會被發現）。
+- **`AnthropicWireFormatTests`** — 用本機假伺服器接住 SDK 真正送出的 HTTP 請求，
+  逐欄檢查 body。不需要金鑰、不花錢。型別轉換編譯得過不代表 wire format 正確。
+- **`QueryEfficiencyTests`** — 斷言查詢次數如何「隨缺料料號數成長」，而不是絕對次數
+  （那會隨 BOM 結構改變，只會製造脆弱的測試）。把 N+1 改回去會紅。
+- **`SystemPromptTests`** — 明確**不驗證 LLM 是否遵守規則**（那需要真實 API 與行為評測），
+  防的是有人重寫 prompt 時把某條規則整個刪掉。
+
+### 每條防線都做過反向驗證
+
+把防線拔掉、確認測試會紅，再還原。沒有紅過的測試等於沒有測試。
+八條防線的驗證結果列在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md) 的面試問答一節。
+
+這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
+深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
 
 ## 架構邊界
 
@@ -194,8 +252,8 @@ NetArchTest 檢查的是 `Erp.*` 命名空間，對外部套件無感。實測�
 
 ## 展示資料
 
-`ErpDbSeeder` 灌入的情境就是 `docs/ai-assistant-module-plan-v2.md` 第 5 節範例 2，
-所有日期以執行當天為基準相對產生，資料不會過期。
+`ErpDbSeeder` 灌入的情境所有日期與單號都以執行當天為基準相對產生，資料不會過期。
+完整的展示腳本與每個數字的看點在 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
 
 產品結構：
 
@@ -226,7 +284,7 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **工單風險的預設區間是本週**：逾期超過一週且未結案的工單不會出現在預設查詢中，
   需自行指定 `from`。MRP 則已把所有逾期未結案工單納入。
 - **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
-  `AskAsync` 預留了加 `conversation_id` 的空間，Phase 3 再視情況實作。
+  `AskAsync` 預留了加 `conversation_id` 的空間，尚未實作。
 - **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
   送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
   （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
