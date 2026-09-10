@@ -114,7 +114,7 @@ public class AnthropicWireFormatTests
         await CreateClient(server.BaseUrl).SendAsync(SampleRequest(
             LlmMessage.User("查詢"),
             new LlmMessage(LlmRole.User,
-                [new LlmToolResultBlock("toolu_01", "{\"error\":\"找不到料件\"}", IsError: true)])));
+                [new LlmToolResultBlock("toolu_01", "{\"error_code\":\"ENTITY_NOT_FOUND\",\"message\":\"找不到料件\"}", IsError: true)])));
 
         using var body = JsonDocument.Parse(server.ReceivedBodies[0]);
         var resultBlock = body.RootElement.GetProperty("messages")[1].GetProperty("content")[0];

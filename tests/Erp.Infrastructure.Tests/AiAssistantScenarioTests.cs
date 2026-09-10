@@ -156,6 +156,7 @@ public class AiAssistantScenarioTests : IAsyncLifetime
 
         var block = (LlmToolResultBlock)llm.ReceivedRequests[1].Messages[^1].Content[0];
         Assert.True(block.IsError);
+        Assert.Contains("NOT_APPLICABLE", block.Content);
         Assert.Contains("沒有 BOM", block.Content);
     }
 
@@ -205,6 +206,7 @@ public class AiAssistantScenarioTests : IAsyncLifetime
 
         var block = (LlmToolResultBlock)llm.ReceivedRequests[1].Messages[^1].Content[0];
         Assert.True(block.IsError);
+        Assert.Contains("INVALID_ARGUMENT", block.Content);
         Assert.Contains("YYYY-MM-DD", block.Content);
     }
 }

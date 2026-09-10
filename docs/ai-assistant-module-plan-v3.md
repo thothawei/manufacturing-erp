@@ -94,12 +94,12 @@
 | # | 工作 | 產出 | 估計 |
 |---|---|---|---|
 | ~~G1~~ | ~~`ToolDispatcher` 加上總括的例外攔截~~ **已完成** | 見下方 3.1.1 | — |
-| G2 | 錯誤回傳改為 `{ "error_code": "...", "message": "..." }`，錯誤碼列舉化 | `ToolErrorCode` + 既有錯誤測試改斷言錯誤碼 | 小 |
+| ~~G2~~ | ~~錯誤回傳改為 `{ "error_code": ..., "message": ... }`~~ **已完成** | 見下方 3.1.2 | — |
 | G3+G4 | system prompt 補兩條：超出範圍禮貌拒答、同一工具失敗不重試超過一次 | 更新 `AiSystemPrompt` | 極小 |
 | G5 | log 補上輸入參數與耗時，改成結構化欄位 | `AiAssistantService` 的 log 呼叫 + `Stopwatch` | 小 |
 | G6 | 支援 `dotnet user-secrets`，README 補本機設定步驟 | `Program.cs` 一行 + 文件 | 極小 |
 
-剩餘（G2–G6）合計約 1 次工作階段。
+剩餘（G3–G6）合計約 0.5 次工作階段。
 
 ### 3.1.1 G1 已完成
 
@@ -121,6 +121,31 @@
 
 順帶修掉一個同源問題：log 裡的參數原本用 `JsonElement.ToString()` 輸出，
 會把中文逃逸成 `\uXXXX`。log 是給人看的，那樣根本讀不出來查了什麼，改用同一組序列化設定。
+
+### 3.1.2 G2 已完成
+
+五個錯誤碼，wire 值寫死在 `ToolErrorCodeExtensions` —— 錯誤碼是對外契約的一部分，
+改 enum 成員名稱不該意外改掉送給 LLM 的值。
+
+| error_code | 對應例外／情境 |
+|---|---|
+| `ENTITY_NOT_FOUND` | `EntityNotFoundException`（料件、工單都適用） |
+| `INVALID_ARGUMENT` | `ArgumentException`：參數缺漏、日期或數字格式錯 |
+| `NOT_APPLICABLE` | `InvalidOperationException`：參數合法但問法不適用 |
+| `UNKNOWN_TOOL` | 呼叫了不存在的工具 |
+| `INTERNAL_ERROR` | 未預期例外（G1） |
+
+**與規劃 6.2 的一處微調**：規劃寫 `ITEM_NOT_FOUND`，實作用 `ENTITY_NOT_FOUND`。
+查無資料不只發生在料件（工單也會），用通用碼比較正確，是什麼查不到由 `message` 說明。
+
+system prompt 補上逐碼的反應規則 —— 只給錯誤碼而不說明該怎麼反應的話，
+LLM 還是只能靠讀中文訊息猜，等於白做。這條同時涵蓋了 G4（工具失敗不重複重試）的一半：
+`ENTITY_NOT_FOUND`、`NOT_APPLICABLE`、`INTERNAL_ERROR` 都明寫「不要重試」。
+
+九條契約測試涵蓋每個錯誤碼，外加一條完整性測試：新增 enum 成員卻忘記加 wire 字串會直接紅。
+反向驗證：忘記加字串會抓到、誤分類紅 3 條、移除 `error_code` 欄位紅 13 條。
+
+順帶清掉兩個先前被 `-v q` 隱藏的可空性警告，現在建置是 0 警告。
 
 ### 3.2 需要你拍板的兩個決策
 

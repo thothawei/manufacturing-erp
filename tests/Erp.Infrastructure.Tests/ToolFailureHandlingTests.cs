@@ -69,6 +69,7 @@ public class ToolFailureHandlingTests
         var result = await dispatcher.ExecuteAsync(ToolCatalog.SearchItems, Args(new { keyword = "面板" }));
 
         Assert.True(result.IsError);
+        Assert.Contains("INTERNAL_ERROR", result.Content);
         Assert.Contains("系統錯誤", result.Content);
     }
 

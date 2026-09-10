@@ -32,12 +32,13 @@ public sealed class AnthropicLlmClient : ILlmClient
             Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds)
         };
 
+        // hasApiKey / hasBaseUrl 已經確認過非空，用 ! 告訴編譯器這件事
         _client = (hasApiKey, hasBaseUrl) switch
         {
             (true, true) => new AnthropicClient
-                { ApiKey = _options.ApiKey, BaseUrl = _options.BaseUrl, HttpClient = httpClient },
-            (true, false) => new AnthropicClient { ApiKey = _options.ApiKey, HttpClient = httpClient },
-            (false, true) => new AnthropicClient { BaseUrl = _options.BaseUrl, HttpClient = httpClient },
+                { ApiKey = _options.ApiKey!, BaseUrl = _options.BaseUrl!, HttpClient = httpClient },
+            (true, false) => new AnthropicClient { ApiKey = _options.ApiKey!, HttpClient = httpClient },
+            (false, true) => new AnthropicClient { BaseUrl = _options.BaseUrl!, HttpClient = httpClient },
             _ => new AnthropicClient { HttpClient = httpClient }  // 由 SDK 讀 ANTHROPIC_API_KEY
         };
     }

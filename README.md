@@ -122,6 +122,21 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `UnicodeNormalizingHandler` | 見下方「中文逃逸」 |
 | `NormalizedDecimalConverter` | 數量輸出 `30` 而不是 `30.0`，見下方 |
 
+### 工具錯誤契約
+
+工具失敗時回傳 `{ "error_code": ..., "message": ... }`，`message` 給人看，
+`error_code` 讓 LLM 有依據決定下一步（system prompt 逐碼說明該怎麼反應）：
+
+| error_code | 情境 | LLM 該做的事 |
+|---|---|---|
+| `ENTITY_NOT_FOUND` | 資料不存在 | 告知查不到，不要重試 |
+| `INVALID_ARGUMENT` | 參數缺漏或格式不對 | 依 message 修正後可重試一次 |
+| `NOT_APPLICABLE` | 參數合法但問法不適用（如對原物料問可製造量） | 說明原因，不要重試 |
+| `UNKNOWN_TOOL` / `INTERNAL_ERROR` | 呼叫了不存在的工具／未預期錯誤 | 不要重試 |
+
+未預期例外一律降級成單一工具的失敗，不會讓整段對話回 500；
+例外全文只進伺服器 log，回給 LLM 的內容不含型別、堆疊或內部細節。
+
 ### 三個實作上踩到的點
 
 **中文逃逸**：SDK 內部用預設 JSON 編碼器，會把中文逃逸成 `\uXXXX`。系統提示詞、

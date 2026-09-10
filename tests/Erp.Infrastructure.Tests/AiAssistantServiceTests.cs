@@ -107,6 +107,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
 
         var toolResult = (LlmToolResultBlock)llm.ReceivedRequests[1].Messages[2].Content[0];
         Assert.True(toolResult.IsError);
+        Assert.Contains("ENTITY_NOT_FOUND", toolResult.Content);
         Assert.Contains("找不到料件", toolResult.Content);
     }
 
@@ -123,7 +124,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
 
         var toolResult = (LlmToolResultBlock)llm.ReceivedRequests[1].Messages[2].Content[0];
         Assert.True(toolResult.IsError);
-        Assert.Contains("未知的工具名稱", toolResult.Content);
+        Assert.Contains("UNKNOWN_TOOL", toolResult.Content);
     }
 
     [Fact]
@@ -137,6 +138,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
 
         var toolResult = (LlmToolResultBlock)llm.ReceivedRequests[1].Messages[2].Content[0];
         Assert.True(toolResult.IsError);
+        Assert.Contains("INVALID_ARGUMENT", toolResult.Content);
         Assert.Contains("缺少必要參數 item_code", toolResult.Content);
     }
 

@@ -85,23 +85,24 @@ public sealed class ToolDispatcher(
                     OptionalDate(arguments, "date_range_start"),
                     OptionalDate(arguments, "date_range_end"), ct)),
 
-                _ => Error($"未知的工具名稱：{toolName}")
+                _ => Error(ToolErrorCode.UnknownTool, $"未知的工具名稱：{toolName}")
             };
         }
         catch (EntityNotFoundException ex)
         {
             // 查無資料是正常結果，不是系統故障。如實回報讓 LLM 告訴使用者查不到，
             // 而不是讓它自己編一個看起來合理的答案。
-            return Error(ex.Message);
+            return Error(ToolErrorCode.EntityNotFound, ex.Message);
         }
         catch (ArgumentException ex)
         {
             // ArgumentOutOfRangeException 也走這條（它繼承自 ArgumentException）
-            return Error($"參數錯誤：{ex.Message}");
+            return Error(ToolErrorCode.InvalidArgument, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return Error(ex.Message);
+            // 參數本身合法，但這筆資料不適用這個問法（例如對原物料問可製造量）
+            return Error(ToolErrorCode.NotApplicable, ex.Message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -123,15 +124,18 @@ public sealed class ToolDispatcher(
                 "工具 {ToolName} 執行時發生未預期的例外，參數：{Arguments}",
                 toolName, JsonSerializer.Serialize(arguments, JsonOptions));
 
-            return Error("查詢時發生系統錯誤，這項資料目前查不到。");
+            return Error(ToolErrorCode.InternalError, "查詢時發生系統錯誤，這項資料目前查不到。");
         }
     }
 
     private static ToolExecutionResult Ok<T>(T value)
         => new(JsonSerializer.Serialize(value, JsonOptions), IsError: false);
 
-    private static ToolExecutionResult Error(string message)
-        => new(JsonSerializer.Serialize(new { error = message }, JsonOptions), IsError: true);
+    private static ToolExecutionResult Error(ToolErrorCode code, string message)
+        => new(
+            JsonSerializer.Serialize(
+                new { error_code = code.ToWireValue(), message }, JsonOptions),
+            IsError: true);
 
     private static string RequireString(JsonElement arguments, string propertyName)
     {
