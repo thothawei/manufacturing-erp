@@ -14,5 +14,5 @@ public sealed class PurchaseOrder
     /// 尚未入庫的數量，即「在途量」
     public decimal InTransitQty => Math.Max(0m, OrderedQty - ReceivedQty);
 
-    public bool IsOpen => Status is PurchaseOrderStatus.Open or PurchaseOrderStatus.PartiallyReceived;
+    public bool IsOpen => PurchaseOrderStatuses.Open.Contains(Status);
 }

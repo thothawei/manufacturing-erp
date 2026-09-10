@@ -51,7 +51,9 @@ public sealed class MrpCalculationService(
         var start = clock.Today;
         var end = start.AddDays(horizonDays);
 
-        var workOrders = await workOrderRepository.GetOpenWorkOrdersByDueDateAsync(start, end, ct);
+        // 查詢起點刻意用 MinValue 而不是今天：已逾交期但尚未結案的工單仍然要料，
+        // 而且是最急的需求。以今天為起點會把它們整批漏掉，導致 MRP 少買。
+        var workOrders = await workOrderRepository.GetOpenWorkOrdersByDueDateAsync(DateOnly.MinValue, end, ct);
 
         // 毛需求與需求日期（取最早的交期，代表最急的那張工單）
         var grossByCode = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -111,6 +113,15 @@ public sealed class MrpCalculationService(
         var items = await itemRepository.GetByCodesAsync(codes, ct);
         var nameByCode = items.ToDictionary(i => i.ItemCode, i => i.ItemName, StringComparer.OrdinalIgnoreCase);
 
+        // 採購單與補料條件都在迴圈外一次撈完，避免每個缺料料號各打一次資料庫
+        var allOpenPurchaseOrders = await purchaseOrderRepository.GetOpenAsync(ct: ct);
+        var openPosByItem = allOpenPurchaseOrders
+            .GroupBy(p => p.ItemCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var supplyInfos = await itemRepository.GetSupplyInfosAsync(codes, ct);
+        var supplyByCode = supplyInfos.ToDictionary(s => s.ItemCode, StringComparer.OrdinalIgnoreCase);
+
         var shortages = new List<ShortageItem>();
 
         foreach (var (code, gross) in grossByCode)
@@ -119,8 +130,7 @@ public sealed class MrpCalculationService(
             var available = availableByCode.GetValueOrDefault(code, 0m);
 
             // 只有能在需求日之前到貨的採購單才算得上供給
-            var openPos = await purchaseOrderRepository.GetOpenAsync(itemCode: code, ct: ct);
-            var inTransit = openPos
+            var inTransit = openPosByItem.GetValueOrDefault(code, [])
                 .Where(p => p.ExpectedArrivalDate <= neededBy)
                 .Sum(p => p.InTransitQty);
 
@@ -130,7 +140,7 @@ public sealed class MrpCalculationService(
                 continue;
             }
 
-            var supply = await itemRepository.GetSupplyInfoAsync(code, ct);
+            var supply = supplyByCode.GetValueOrDefault(code);
 
             shortages.Add(new ShortageItem(
                 code,

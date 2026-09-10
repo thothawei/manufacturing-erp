@@ -30,6 +30,11 @@ public sealed class InMemoryItemRepository(IEnumerable<Item> items, IEnumerable<
     public Task<ItemSupplyInfo?> GetSupplyInfoAsync(string itemCode, CancellationToken ct = default)
         => Task.FromResult(_supplyInfos.FirstOrDefault(s =>
             string.Equals(s.ItemCode, itemCode, StringComparison.OrdinalIgnoreCase)));
+
+    public Task<IReadOnlyList<ItemSupplyInfo>> GetSupplyInfosAsync(
+        IReadOnlyCollection<string> itemCodes, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ItemSupplyInfo>>([.. _supplyInfos.Where(s =>
+            itemCodes.Contains(s.ItemCode, StringComparer.OrdinalIgnoreCase))]);
 }
 
 public sealed class InMemoryInventoryRepository(IEnumerable<InventoryBalance> balances) : IInventoryRepository

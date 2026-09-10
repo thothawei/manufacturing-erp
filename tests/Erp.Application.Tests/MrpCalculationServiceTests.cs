@@ -186,6 +186,21 @@ public class MrpCalculationServiceTests
     }
 
     [Fact]
+    public async Task 已逾交期但未結案的工單仍要納入試算()
+    {
+        // 交期已過但工單還沒做完，物料照樣要備 —— 以今天為查詢起點會整批漏掉
+        var service = CreateService(
+            [Wo("WO-OVERDUE", new DateOnly(2026, 9, 5))],
+            [TestData.Balance("SCREW-05", 100_000m)]);
+
+        var shortage = Assert.Single((await service.RunShortageAnalysisAsync()).ShortageItems);
+
+        Assert.Equal("PANEL-01", shortage.ItemCode);
+        Assert.Equal(200m, shortage.GrossRequirementQty);
+        Assert.Equal(new DateOnly(2026, 9, 5), shortage.NeededByDate); // 需求日已過期，代表來不及了
+    }
+
+    [Fact]
     public async Task 規劃期間必須大於零天()
     {
         var service = CreateService([], []);

@@ -86,13 +86,11 @@ public sealed class WorkOrderRiskService(
         var worst = sufficiency.ShortageComponents.MaxBy(c => c.ShortfallQty)!;
         reasons.Add($"缺料：{worst.ComponentCode} 短少 {Format(worst.ShortfallQty)} 件");
 
-        // 缺料件中補料最慢的那個決定能否趕上交期
-        var maxLeadTime = 0;
-        foreach (var shortage in sufficiency.ShortageComponents)
-        {
-            var supply = await itemRepository.GetSupplyInfoAsync(shortage.ComponentCode, ct);
-            maxLeadTime = Math.Max(maxLeadTime, supply?.LeadTimeDays ?? 0);
-        }
+        // 缺料件中補料最慢的那個決定能否趕上交期。
+        // 一次撈完所有缺料件的補料條件，不要在迴圈裡逐筆查（N+1）。
+        var supplyInfos = await itemRepository.GetSupplyInfosAsync(
+            [.. sufficiency.ShortageComponents.Select(c => c.ComponentCode)], ct);
+        var maxLeadTime = supplyInfos.Count == 0 ? 0 : supplyInfos.Max(s => s.LeadTimeDays);
 
         var daysUntilDue = dueDate.DayNumber - clock.Today.DayNumber;
         return Math.Max(0, maxLeadTime - daysUntilDue);
