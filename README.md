@@ -16,8 +16,12 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 | 想看什麼 | 去哪裡 |
 |---|---|
 | 三十秒跑起來、實際輸出、面試問答 | [`docs/demo-and-interview.md`](docs/demo-and-interview.md) |
-| 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
+| 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
+| 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
+| 最初的規劃長什麼樣 | [`docs/ai-assistant-module-plan-v1.md`](docs/ai-assistant-module-plan-v1.md)（動工前原貌） |
+
+規劃演進是 **v1 原始構想 → v2 動工前修訂 → v3 實作完成後對帳**。
 
 ## 專案結構
 
