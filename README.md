@@ -68,6 +68,10 @@ dotnet format --verify-no-changes
 dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
+啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
+十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
+
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
 
 ## 目前進度

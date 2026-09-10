@@ -16,6 +16,11 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 不需要 Docker、不需要外部資料庫。開發模式會自動建表並灌入展示資料，
 資料庫是一個 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就重新產生。
 
+**展示時從這裡開始**：http://localhost:5199/scalar/v1
+
+互動式 API 文件（Scalar），十個端點都有中文說明與參數型別，可以直接在瀏覽器裡按
+Test Request 試打。下面第 3 節的 curl 都可以改用這個介面操作，對方不必看終端機。
+
 啟動時會印出 AI 助理的生效設定：
 
 ```
