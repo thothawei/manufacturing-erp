@@ -94,8 +94,11 @@ public class WorkOrderProgressServiceTests
     {
         var wo = new WorkOrder
         {
-            WorkOrderNo = "WO-01", ItemCode = "TV-100", PlannedQty = 100m,
-            DueDate = new DateOnly(2026, 9, 15), Status = WorkOrderStatus.InProgress,
+            WorkOrderNo = "WO-01",
+            ItemCode = "TV-100",
+            PlannedQty = 100m,
+            DueDate = new DateOnly(2026, 9, 15),
+            Status = WorkOrderStatus.InProgress,
             MaterialIssueStatus = "已全數發料"
         };
         var steps = new RoutingStep[]

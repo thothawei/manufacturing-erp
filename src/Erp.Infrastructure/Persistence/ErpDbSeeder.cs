@@ -97,23 +97,39 @@ public static class ErpDbSeeder
         db.WorkOrders.AddRange(
             new WorkOrder
             {
-                WorkOrderNo = shortageWo, ItemCode = "TV-100", PlannedQty = 100m,
-                DueDate = today.AddDays(3), Status = WorkOrderStatus.Released, MaterialIssueStatus = "未發料"
+                WorkOrderNo = shortageWo,
+                ItemCode = "TV-100",
+                PlannedQty = 100m,
+                DueDate = today.AddDays(3),
+                Status = WorkOrderStatus.Released,
+                MaterialIssueStatus = "未發料"
             },
             new WorkOrder
             {
-                WorkOrderNo = overdueWo, ItemCode = "MON-200", PlannedQty = 30m,
-                DueDate = today.AddDays(-2), Status = WorkOrderStatus.InProgress, MaterialIssueStatus = "已全數發料"
+                WorkOrderNo = overdueWo,
+                ItemCode = "MON-200",
+                PlannedQty = 30m,
+                DueDate = today.AddDays(-2),
+                Status = WorkOrderStatus.InProgress,
+                MaterialIssueStatus = "已全數發料"
             },
             new WorkOrder
             {
-                WorkOrderNo = futureWo, ItemCode = "MON-200", PlannedQty = 30m,
-                DueDate = today.AddDays(45), Status = WorkOrderStatus.Planned, MaterialIssueStatus = "未發料"
+                WorkOrderNo = futureWo,
+                ItemCode = "MON-200",
+                PlannedQty = 30m,
+                DueDate = today.AddDays(45),
+                Status = WorkOrderStatus.Planned,
+                MaterialIssueStatus = "未發料"
             },
             new WorkOrder
             {
-                WorkOrderNo = doneWo, ItemCode = "TV-100", PlannedQty = 20m,
-                DueDate = today.AddDays(-10), Status = WorkOrderStatus.Completed, MaterialIssueStatus = "已全數發料"
+                WorkOrderNo = doneWo,
+                ItemCode = "TV-100",
+                PlannedQty = 20m,
+                DueDate = today.AddDays(-10),
+                Status = WorkOrderStatus.Completed,
+                MaterialIssueStatus = "已全數發料"
             });
 
         db.RoutingSteps.AddRange(
@@ -132,38 +148,64 @@ public static class ErpDbSeeder
             // 面板已下單 30 片，但 10 天後才到、趕不上 3 天後的需求 → MRP 不能把它算成供給
             new PurchaseOrder
             {
-                PoNo = $"PO-{stamp}-001", SupplierCode = "SUP-008", ItemCode = "PANEL-01",
-                OrderedQty = 30m, ReceivedQty = 0m,
-                ExpectedArrivalDate = today.AddDays(10), Status = PurchaseOrderStatus.Open
+                PoNo = $"PO-{stamp}-001",
+                SupplierCode = "SUP-008",
+                ItemCode = "PANEL-01",
+                OrderedQty = 30m,
+                ReceivedQty = 0m,
+                ExpectedArrivalDate = today.AddDays(10),
+                Status = PurchaseOrderStatus.Open
             },
             new PurchaseOrder
             {
-                PoNo = $"PO-{stamp}-002", SupplierCode = "SUP-021", ItemCode = "SCREW-05",
-                OrderedQty = 1_000m, ReceivedQty = 400m,
-                ExpectedArrivalDate = today.AddDays(2), Status = PurchaseOrderStatus.PartiallyReceived
+                PoNo = $"PO-{stamp}-002",
+                SupplierCode = "SUP-021",
+                ItemCode = "SCREW-05",
+                OrderedQty = 1_000m,
+                ReceivedQty = 400m,
+                ExpectedArrivalDate = today.AddDays(2),
+                Status = PurchaseOrderStatus.PartiallyReceived
             },
             new PurchaseOrder
             {
-                PoNo = $"PO-{stamp}-003", SupplierCode = "SUP-015", ItemCode = "CABLE-07",
-                OrderedQty = 100m, ReceivedQty = 100m,
-                ExpectedArrivalDate = today.AddDays(-5), Status = PurchaseOrderStatus.Received
+                PoNo = $"PO-{stamp}-003",
+                SupplierCode = "SUP-015",
+                ItemCode = "CABLE-07",
+                OrderedQty = 100m,
+                ReceivedQty = 100m,
+                ExpectedArrivalDate = today.AddDays(-5),
+                Status = PurchaseOrderStatus.Received
             });
 
         db.QualityInspections.AddRange(
             new QualityInspection
             {
-                InspectionNo = $"QC-{stamp}-001", WorkOrderNo = overdueWo, ItemCode = "MON-200",
-                InspectedAt = today.AddDays(-3), InspectedQty = 10m, PassedQty = 9m, FailReason = "外觀刮傷"
+                InspectionNo = $"QC-{stamp}-001",
+                WorkOrderNo = overdueWo,
+                ItemCode = "MON-200",
+                InspectedAt = today.AddDays(-3),
+                InspectedQty = 10m,
+                PassedQty = 9m,
+                FailReason = "外觀刮傷"
             },
             new QualityInspection
             {
-                InspectionNo = $"QC-{stamp}-002", WorkOrderNo = overdueWo, ItemCode = "MON-200",
-                InspectedAt = today.AddDays(-1), InspectedQty = 10m, PassedQty = 8m, FailReason = "亮點超標"
+                InspectionNo = $"QC-{stamp}-002",
+                WorkOrderNo = overdueWo,
+                ItemCode = "MON-200",
+                InspectedAt = today.AddDays(-1),
+                InspectedQty = 10m,
+                PassedQty = 8m,
+                FailReason = "亮點超標"
             },
             new QualityInspection
             {
-                InspectionNo = $"QC-{stamp}-003", WorkOrderNo = doneWo, ItemCode = "TV-100",
-                InspectedAt = today.AddDays(-9), InspectedQty = 20m, PassedQty = 20m
+                InspectionNo = $"QC-{stamp}-003",
+                WorkOrderNo = doneWo,
+                ItemCode = "TV-100",
+                InspectedAt = today.AddDays(-9),
+                InspectedQty = 20m,
+                PassedQty = 20m
             });
 
         await db.SaveChangesAsync(ct);

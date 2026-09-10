@@ -53,30 +53,44 @@ public class QueryEfficiencyTests
 
             setup.Items.Add(new Item
             {
-                ItemCode = "F1", ItemName = "成品", ItemType = ItemType.FinishedGood, Unit = "台"
+                ItemCode = "F1",
+                ItemName = "成品",
+                ItemType = ItemType.FinishedGood,
+                Unit = "台"
             });
 
             for (var i = 1; i <= componentCount; i++)
             {
                 setup.Items.Add(new Item
                 {
-                    ItemCode = $"R{i}", ItemName = $"原料{i}", ItemType = ItemType.RawMaterial, Unit = "個"
+                    ItemCode = $"R{i}",
+                    ItemName = $"原料{i}",
+                    ItemType = ItemType.RawMaterial,
+                    Unit = "個"
                 });
                 setup.BomLines.Add(new BomLine
                 {
-                    ParentItemCode = "F1", ComponentItemCode = $"R{i}", QtyPer = 1m, BomVersion = "v1"
+                    ParentItemCode = "F1",
+                    ComponentItemCode = $"R{i}",
+                    QtyPer = 1m,
+                    BomVersion = "v1"
                 });
                 setup.ItemSupplyInfos.Add(new ItemSupplyInfo
                 {
-                    ItemCode = $"R{i}", SupplierCode = "SUP-001", LeadTimeDays = 3
+                    ItemCode = $"R{i}",
+                    SupplierCode = "SUP-001",
+                    LeadTimeDays = 3
                 });
             }
 
             // 完全沒有庫存 → 每個原料都會落入缺料清單
             setup.WorkOrders.Add(new WorkOrder
             {
-                WorkOrderNo = "WO-01", ItemCode = "F1", PlannedQty = 10m,
-                DueDate = Today.AddDays(5), Status = WorkOrderStatus.Released
+                WorkOrderNo = "WO-01",
+                ItemCode = "F1",
+                PlannedQty = 10m,
+                DueDate = Today.AddDays(5),
+                Status = WorkOrderStatus.Released
             });
 
             await setup.SaveChangesAsync();

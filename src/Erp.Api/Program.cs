@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Erp.Api.ErrorHandling;
 using Erp.Application;
 using Erp.Application.Abstractions;
@@ -15,7 +16,6 @@ using Erp.Infrastructure.Json;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 

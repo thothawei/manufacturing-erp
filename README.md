@@ -38,6 +38,10 @@ Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Applicatio
 
 依賴方向固定為 `Api → Infrastructure → Application → Domain`，Domain 不知道上層存在。
 
+## 授權
+
+[MIT](LICENSE)
+
 ## 開發環境
 
 需要 .NET 10 SDK。本機以 Homebrew 安裝時要設定：
@@ -50,6 +54,12 @@ export DOTNET_ROOT="/opt/homebrew/opt/dotnet/libexec"
 
 ```bash
 dotnet build && dotnet test
+```
+
+格式由 `.editorconfig` 規範（C# 4 空格、專案檔與 JSON/YAML 2 空格），CI 會驗證：
+
+```bash
+dotnet format --verify-no-changes
 ```
 
 啟動 API（開發模式會自動建表並灌入展示資料）：

@@ -1,0 +1,40 @@
+# 這個專案的格式規範。CI 在 Linux 上跑，換行一律 LF。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# C# 用 4 空格，這是 .NET 生態的慣例，也是本專案既有的寫法
+[*.cs]
+indent_size = 4
+
+# 命名空間用檔案範圍宣告（namespace X; 而非 namespace X { }），與現有程式碼一致
+csharp_style_namespace_declarations = file_scoped:warning
+
+# using 放在命名空間外、System 排最前
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+
+# 專案檔與設定檔沿用各自生態的慣例
+[*.{csproj,props,targets}]
+indent_size = 2
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+# Markdown 的行尾兩個空白是換行語法，不能砍
+trim_trailing_whitespace = false
+
+[*.sh]
+indent_size = 2
+
+# EF Core 產生的 migration：重新產生時會覆蓋，不套用本專案的格式規範
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_diagnostic.IDE0161.severity = none

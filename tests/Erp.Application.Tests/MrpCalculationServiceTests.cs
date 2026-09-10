@@ -32,8 +32,14 @@ public class MrpCalculationServiceTests
     }
 
     private static WorkOrder Wo(string no, DateOnly due, decimal qty = 100m) =>
-        new() { WorkOrderNo = no, ItemCode = "TV-100", PlannedQty = qty, DueDate = due,
-                Status = WorkOrderStatus.Released };
+        new()
+        {
+            WorkOrderNo = no,
+            ItemCode = "TV-100",
+            PlannedQty = qty,
+            DueDate = due,
+            Status = WorkOrderStatus.Released
+        };
 
     [Fact]
     public async Task 淨缺料量等於毛需求扣掉可用庫存與在途量()

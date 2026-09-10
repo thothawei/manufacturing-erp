@@ -85,7 +85,9 @@ public class RepositoryTests
         await using var fixture = new SqliteTestDatabase();
         fixture.Db.InventoryBalances.Add(new()
         {
-            ItemCode = "PANEL-01", OnHandQty = 123.456m, ReservedQty = 0.004m
+            ItemCode = "PANEL-01",
+            OnHandQty = 123.456m,
+            ReservedQty = 0.004m
         });
         await fixture.Db.SaveChangesAsync();
 
