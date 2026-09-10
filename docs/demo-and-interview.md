@@ -129,6 +129,12 @@ curl "http://localhost:5199/api/work-orders/at-risk"
 
 ### 3.4 MRP：建議採購量不是缺料量
 
+![MRP 端點在 Scalar 中的說明](images/scalar-mrp-endpoint.png)
+
+API 文件裡就寫明了兩個關鍵前提：已逾期未結案的工單也會納入、
+`suggestedOrderQty` 已套用最小訂購量與訂購倍量所以要直接引用。
+這兩件事都是用了才會發現的陷阱，寫在端點說明比藏在 README 有用。
+
 ```bash
 curl "http://localhost:5199/api/mrp/shortages"
 ```
