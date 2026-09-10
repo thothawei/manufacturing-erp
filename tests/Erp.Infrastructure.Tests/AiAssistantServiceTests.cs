@@ -1,9 +1,6 @@
 using System.Text.Json;
-using Erp.Application.Inventory;
-using Erp.Application.Items;
 using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Persistence;
-using Erp.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -23,11 +20,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
         var clock = new TestClock(Today);
         await ErpDbSeeder.SeedAsync(_fixture.Db, clock);
 
-        var db = _fixture.CreateContext();
-        var itemRepo = new ItemRepository(db);
-        _dispatcher = new ToolDispatcher(
-            new ItemMasterQueryService(itemRepo),
-            new InventoryQueryService(itemRepo, new InventoryRepository(db), clock));
+        _dispatcher = TestServices.CreateDispatcher(_fixture, clock);
     }
 
     public async Task DisposeAsync() => await _fixture.DisposeAsync();

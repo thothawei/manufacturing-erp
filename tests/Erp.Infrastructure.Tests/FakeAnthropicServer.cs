@@ -26,6 +26,9 @@ public sealed class FakeAnthropicServer : IDisposable
 
     public string BaseUrl { get; }
 
+    /// 回應前的延遲，用來測試逾時
+    public TimeSpan ResponseDelay { get; set; } = TimeSpan.Zero;
+
     public List<string> ReceivedBodies { get; } = [];
     public List<string> ReceivedBetaHeaders { get; } = [];
     public List<string> ReceivedPaths { get; } = [];
@@ -48,6 +51,11 @@ public sealed class FakeAnthropicServer : IDisposable
             ReceivedBodies.Add(await reader.ReadToEndAsync());
             ReceivedBetaHeaders.Add(context.Request.Headers["anthropic-beta"] ?? "");
             ReceivedPaths.Add(context.Request.Url?.AbsolutePath ?? "");
+
+            if (ResponseDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(ResponseDelay);
+            }
 
             var body = _responseBodies.Count > 0
                 ? _responseBodies.Dequeue()

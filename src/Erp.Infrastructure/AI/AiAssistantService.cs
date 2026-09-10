@@ -25,8 +25,11 @@ public sealed class AiAssistantService(
 
         for (var iteration = 1; iteration <= _options.MaxToolIterations; iteration++)
         {
+            // 傳快照而不是 messages 本身：這個 List 在迴圈後續還會被 Add，
+            // 直接傳參考的話，任何暫存請求的實作（重試、記錄、批次）
+            // 事後讀到的都會是被改過的內容
             var response = await llmClient.SendAsync(
-                new LlmRequest(AiSystemPrompt.Text, messages, ToolCatalog.All), ct);
+                new LlmRequest(AiSystemPrompt.Text, [.. messages], ToolCatalog.All), ct);
 
             if (!response.RequiresToolExecution)
             {

@@ -16,4 +16,8 @@ public sealed class AiAssistantOptions
 
     /// tool-use 迴圈的輪數上限，防止 LLM 無止境地互相呼叫工具
     public int MaxToolIterations { get; set; } = 5;
+
+    /// 單次 LLM 呼叫的逾時秒數。SDK 預設是 10 分鐘，對互動式查詢太長 ——
+    /// 使用者會先放棄，但請求還掛在那裡。重試次數沿用 SDK 預設的 2 次。
+    public int TimeoutSeconds { get; set; } = 60;
 }

@@ -11,13 +11,14 @@ namespace Erp.Infrastructure.Tests;
 /// 這裡把請求導向本機假伺服器，不需要金鑰也不會產生費用。
 public class AnthropicWireFormatTests
 {
-    private static AnthropicLlmClient CreateClient(string baseUrl) => new(Options.Create(
+    private static AnthropicLlmClient CreateClient(string baseUrl, int timeoutSeconds = 60) => new(Options.Create(
         new AiAssistantOptions
         {
             ApiKey = "sk-ant-test-key-not-real",
             BaseUrl = baseUrl,
             Model = "claude-opus-5",
-            MaxTokens = 8_000
+            MaxTokens = 8_000,
+            TimeoutSeconds = timeoutSeconds
         }));
 
     private static LlmRequest SampleRequest(params LlmMessage[] messages)
@@ -164,5 +165,20 @@ public class AnthropicWireFormatTests
         Assert.Contains("面板還有多少可以用", body);
         Assert.DoesNotContain("\\u9762", body);
         Assert.Contains("以關鍵字搜尋料件主檔", body);   // 工具說明同樣不該被逃逸
+    }
+
+    [Fact]
+    public async Task 逾時會轉成可讀的錯誤而不是原始的取消例外()
+    {
+        using var server = new FakeAnthropicServer(FakeAnthropicServer.TextResponse("太慢了"))
+        {
+            ResponseDelay = TimeSpan.FromSeconds(5)
+        };
+
+        var ex = await Assert.ThrowsAsync<LlmUnavailableException>(() =>
+            CreateClient(server.BaseUrl, timeoutSeconds: 1)
+                .SendAsync(SampleRequest(LlmMessage.User("測試"))));
+
+        Assert.Contains("1 秒內沒有回應", ex.Message);
     }
 }

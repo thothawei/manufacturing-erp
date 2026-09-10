@@ -27,7 +27,10 @@ public sealed class AnthropicLlmClient : ILlmClient
         var hasApiKey = !string.IsNullOrWhiteSpace(_options.ApiKey);
         var hasBaseUrl = !string.IsNullOrWhiteSpace(_options.BaseUrl);
 
-        var httpClient = new HttpClient(new UnicodeNormalizingHandler());
+        var httpClient = new HttpClient(new UnicodeNormalizingHandler())
+        {
+            Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds)
+        };
 
         _client = (hasApiKey, hasBaseUrl) switch
         {
@@ -60,6 +63,13 @@ public sealed class AnthropicLlmClient : ILlmClient
         catch (AnthropicIOException ex)
         {
             throw new LlmUnavailableException("無法連線到 AI 服務，請檢查網路連線", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // HttpClient 逾時會以 TaskCanceledException 呈現；
+            // 呼叫端主動取消時 ct 會是 cancelled，那種情況要原樣往上拋
+            throw new LlmUnavailableException(
+                $"AI 服務在 {_options.TimeoutSeconds} 秒內沒有回應", ex);
         }
         catch (AnthropicApiException ex)
         {

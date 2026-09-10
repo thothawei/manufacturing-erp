@@ -10,6 +10,7 @@ using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure;
 using Erp.Infrastructure.AI;
+using Erp.Infrastructure.Json;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
@@ -22,7 +23,12 @@ var connectionString = builder.Configuration.GetConnectionString("ErpDatabase")
 // 列舉一律輸出字串。輸出數字的話，Phase 2 的 LLM 拿到 "status": 1 無從判讀，
 // 正好違反「不留模糊解讀空間」的設計原則。
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+
+    // 數量欄位輸出 30 而不是 30.0，理由見 NormalizedDecimalConverter
+    options.SerializerOptions.Converters.Add(new NormalizedDecimalConverter());
+});
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);

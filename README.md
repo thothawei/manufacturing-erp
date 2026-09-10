@@ -13,6 +13,7 @@ src/
 tests/
   Erp.Application.Tests      Application 層單元測試（以 in-memory 假 Repository 驅動）
   Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
+  Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
   ai-assistant-module-plan-v2.md   AI 助理模組規劃（v2）
 ```
@@ -49,8 +50,8 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | 階段 | 狀態 |
 |---|---|
 | Phase 1 — AI 工具背後的查詢／計算服務 | 完成，含 EF Core 資料層與種子資料 |
-| Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成，接上 2 個工具；**尚未對真實 API 驗證過**（見下方） |
-| Phase 3 — 補完 8 個工具與防幻覺測試 | 未開始 |
+| Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成；**尚未對真實 API 驗證過**（見下方） |
+| Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
 | Phase 4 — 展示準備 | 未開始 |
 
 ### Phase 1 已完成的服務
@@ -89,6 +90,25 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
 
+### 八個工具
+
+全部都是唯讀查詢，沒有一個會寫入資料庫。每個工具都只是薄薄一層，
+把參數轉交給既有的 Application Service，數字一律由後端算好。
+
+| 工具 | 對應服務 |
+|---|---|
+| `search_items` | `ItemMasterQueryService` |
+| `get_item_inventory_status` | `InventoryQueryService` |
+| `check_material_sufficiency_for_item` | `BomExplosionService` |
+| `get_work_order_progress` | `WorkOrderProgressService` |
+| `list_work_orders_at_risk` | `WorkOrderRiskService` |
+| `run_mrp_shortage_analysis` | `MrpCalculationService` |
+| `list_open_purchase_orders` | `PurchasingQueryService` |
+| `get_quality_inspection_summary` | `QualityInspectionQueryService` |
+
+新增工具要改三個地方，少改一個測試就會紅：`ToolCatalog.All`、`ToolDispatcher`
+的 switch、以及 `ToolCatalogConsistencyTests.SampleValue`（沒有範例值會直接擲錯）。
+
 ### 組成
 
 | 類別 | 職責 |
@@ -99,10 +119,9 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `ToolDispatcher` | 工具名稱 → 呼叫既有 Application Service，序列化成 snake_case JSON |
 | `AiAssistantService` | tool-use 迴圈，輪數上限預設 5 |
 | `UnicodeNormalizingHandler` | 見下方「中文逃逸」 |
+| `NormalizedDecimalConverter` | 數量輸出 `30` 而不是 `30.0`，見下方 |
 
-目前接上 `search_items` 與 `get_item_inventory_status` 兩個工具，其餘六個在 Phase 3 補齊。
-
-### 兩個實作上踩到的點
+### 三個實作上踩到的點
 
 **中文逃逸**：SDK 內部用預設 JSON 編碼器，會把中文逃逸成 `\uXXXX`。系統提示詞、
 工具說明、使用者問題都是中文，實測請求體積變成 2.28 倍（2038 → 893 字元），
@@ -111,6 +130,24 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 **工具參數不是單一 JSON 值**：`BetaToolUseBlockParam.Input` 的型別是屬性字典，
 把 `JsonElement` 直接丟進去編不過，回送 tool_use 時要展開。
+
+**數量帶著沒有意義的小數尾巴**：SQLite 把 decimal 存成 TEXT，讀回來會保留原本的小數位數，
+於是 `30m` 存進去再取出變成 `30.0`。LLM 可能照抄成「短少 120.0 件」，每個數字也多花 token。
+`NormalizedDecimalConverter` 在序列化時去掉無意義的尾隨零，AI 工具與 REST 端點共用。
+
+## 架構邊界
+
+`Erp.ArchitectureTests` 讓分層規則被 CI 保護，而不是靠自律：
+
+- Domain 不得相依於任何其他層，也不得參考 EF Core
+- Application 不得相依於 Infrastructure（依賴反轉的方向）
+- Domain 與 Application 都不得參考任何 LLM 廠商套件
+- Persistence 與 AI 是平行子系統，Persistence 不得相依於 AI
+
+其中「不得參考 LLM 廠商套件」用的是組件參考檢查而不是命名空間規則 ——
+NetArchTest 檢查的是 `Erp.*` 命名空間，對外部套件無感。實測在 Domain 裡寫
+`typeof(Anthropic.AnthropicClient)` 時，只有組件參考那條會紅。
+（注意 `nameof` 是編譯期常數，不會在 IL 留下型別參考，用它測不出違規。）
 
 ## 展示資料
 
@@ -147,7 +184,7 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
   需自行指定 `from`。MRP 則已把所有逾期未結案工單納入。
 - **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
   `AskAsync` 預留了加 `conversation_id` 的空間，Phase 3 再視情況實作。
-- **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由 38 個測試涵蓋，
+- **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
   送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
   （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
 - **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
