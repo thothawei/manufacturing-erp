@@ -95,8 +95,8 @@ public class ToolFailureHandlingTests
 
         await dispatcher.ExecuteAsync(ToolCatalog.SearchItems, Args(new { keyword = "面板" }));
 
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Error, entry.Level);
+        // 現在每次呼叫還會多一筆 Information 的稽核紀錄，這裡只看錯誤那筆
+        var entry = Assert.Single(logger.Entries.Where(e => e.Level == LogLevel.Error));
         Assert.NotNull(entry.Exception);                      // 例外物件本身要留下來
         Assert.Contains(ToolCatalog.SearchItems, entry.Message);
         Assert.Contains("面板", entry.Message);                // 參數也要記，才追得出是什麼查詢炸的

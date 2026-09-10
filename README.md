@@ -78,10 +78,25 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ## AI 助理（Phase 2）
 
-需要 Anthropic API 金鑰，設為環境變數即可：
+需要 Anthropic API 金鑰。本機開發用 user-secrets（不會進版控）：
+
+```bash
+dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
+```
+
+或用環境變數（正式環境的做法）：
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+兩者都不要寫進 `appsettings.json`。啟動時會印出生效的設定與金鑰來源（只印來源、不印值）：
+
+```
+AI 助理設定：模型 claude-opus-5，工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
+```
+
+```bash
 dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
@@ -136,6 +151,17 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 未預期例外一律降級成單一工具的失敗，不會讓整段對話回 500；
 例外全文只進伺服器 log，回給 LLM 的內容不含型別、堆疊或內部細節。
+
+### 稽核軌跡
+
+每次工具呼叫都留一筆結構化紀錄 —— 助理最後只吐出一段自然語言，
+沒有這條 log 就無從得知那段話是根據哪些查詢組出來的：
+
+```
+工具呼叫 get_item_inventory_status 完成，成功：True，耗時 12 ms，參數：{"item_code":"PANEL-01"}
+```
+
+未預期例外另外記一筆 `Error`，含例外全文；回給 LLM 的內容則不含任何內部細節。
 
 ### 三個實作上踩到的點
 

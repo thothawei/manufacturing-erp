@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
+using System.Diagnostics;
 using System.Globalization;
 using Erp.Application.Bom;
 using Erp.Application.Common;
@@ -49,6 +50,23 @@ public sealed class ToolDispatcher(
 
     public async Task<ToolExecutionResult> ExecuteAsync(
         string toolName, JsonElement arguments, CancellationToken ct = default)
+    {
+        // 每次工具呼叫都留一筆結構化紀錄：問了什麼、花多久、成不成功。
+        // 這條 log 是 AI 助理唯一的稽核軌跡 —— 沒有它就只能看到最後那段自然語言，
+        // 無從得知答案是根據哪些查詢組出來的。
+        var stopwatch = Stopwatch.StartNew();
+        var result = await ExecuteCoreAsync(toolName, arguments, ct);
+        stopwatch.Stop();
+
+        logger.LogInformation(
+            "工具呼叫 {ToolName} 完成，成功：{Succeeded}，耗時 {ElapsedMs} ms，參數：{Arguments}",
+            toolName, !result.IsError, stopwatch.ElapsedMilliseconds, Describe(arguments));
+
+        return result;
+    }
+
+    private async Task<ToolExecutionResult> ExecuteCoreAsync(
+        string toolName, JsonElement arguments, CancellationToken ct)
     {
         try
         {
@@ -118,15 +136,18 @@ public sealed class ToolDispatcher(
             //
             // 例外全文只進伺服器 log，回給 LLM 的訊息不含型別、堆疊或任何內部細節：
             // 那些對 LLM 沒有用，還可能被它轉述給使用者。
-            // 參數要用同一組序列化設定輸出，JsonElement.ToString() 會把中文逃逸成
-            // \uXXXX，log 是給人看的，那樣根本讀不出來是查了什麼
             logger.LogError(ex,
                 "工具 {ToolName} 執行時發生未預期的例外，參數：{Arguments}",
-                toolName, JsonSerializer.Serialize(arguments, JsonOptions));
+                toolName, Describe(arguments));
 
             return Error(ToolErrorCode.InternalError, "查詢時發生系統錯誤，這項資料目前查不到。");
         }
     }
+
+    /// 參數要用同一組序列化設定輸出，JsonElement.ToString() 會把中文逃逸成
+    /// \uXXXX，log 是給人看的，那樣根本讀不出來是查了什麼
+    private static string Describe(JsonElement arguments)
+        => JsonSerializer.Serialize(arguments, JsonOptions);
 
     private static ToolExecutionResult Ok<T>(T value)
         => new(JsonSerializer.Serialize(value, JsonOptions), IsError: false);

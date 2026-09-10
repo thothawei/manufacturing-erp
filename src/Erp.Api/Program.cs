@@ -13,6 +13,7 @@ using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Json;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +45,13 @@ if (app.Environment.IsDevelopment())
     await db.Database.MigrateAsync();
     await ErpDbSeeder.SeedAsync(db, scope.ServiceProvider.GetRequiredService<IClock>());
 }
+
+// 啟動時把 AI 助理的生效設定印出來（金鑰只印有沒有、不印值）。
+// 沒有這行的話，「user-secrets 到底有沒有被讀到」只能靠猜。
+var aiOptions = app.Services.GetRequiredService<IOptions<AiAssistantOptions>>().Value;
+app.Logger.LogInformation(
+    "AI 助理設定：模型 {Model}，工具迴圈上限 {MaxIterations} 輪，逾時 {TimeoutSeconds} 秒，API 金鑰來源：{KeySource}",
+    aiOptions.Model, aiOptions.MaxToolIterations, aiOptions.TimeoutSeconds, DescribeKeySource(aiOptions));
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
@@ -106,3 +114,19 @@ app.Run();
 public partial class Program;
 
 public sealed record AskRequest(string Question);
+
+public partial class Program
+{
+    /// 只回報金鑰「從哪裡來」，永遠不印出金鑰本身
+    private static string DescribeKeySource(AiAssistantOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.ApiKey))
+        {
+            return "設定檔或 user-secrets";
+        }
+
+        return string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"))
+            ? "未設定（將交由 SDK 自行解析憑證，若無憑證會回 503）"
+            : "環境變數 ANTHROPIC_API_KEY";
+    }
+}
