@@ -18,7 +18,7 @@
 | Phase 1 | 完成 | 八個 Application 查詢／計算服務、Domain 實體、EF Core 資料層、展示種子資料 |
 | Phase 2 | 完成 | `Infrastructure.AI`：`ILlmClient` 抽象、`AnthropicLlmClient`、`ToolCatalog`、`ToolDispatcher`、tool-use 迴圈、`POST /api/ai-assistant/ask` |
 | Phase 3 | 完成 | 八個工具全數接上、架構測試、防幻覺測試 |
-| Phase 4 | 未開始 | 展示準備 |
+| Phase 4 | 完成（一項待金鑰） | 展示腳本與面試問答（`docs/demo-and-interview.md`） |
 
 測試共 112 個（Application 43／Architecture 7／Infrastructure 62），全數通過。
 分層邊界由 `Erp.ArchitectureTests` 保護：Domain 不得相依其他層、不得參考 EF Core 或任何 LLM 廠商套件。
@@ -74,12 +74,27 @@
 
 這是動工時的環境決定（開發機沒有 SQL Server），當時沒有回頭跟規劃對齊，是我的疏漏。
 
-現在的實際影響：**SQLite 把 `decimal` 存成 TEXT，資料庫層無法正確比較或排序數量欄位。**
-目前所有 Repository 都遵守「數量的比較、加總、排序一律在載入記憶體後才做」，
-查詢條件只用字串、日期與列舉。這條約束寫在 `ErpDbContext` 的註解裡，但它是靠自律維持的，
-沒有測試保護 —— 有人寫一個 `.Where(b => b.AvailableQty > 0)` 就會得到錯誤結果而不報錯。
+現在的實際影響 —— **這一段是修正後的內容，原本寫錯了**：
 
-另外 SQLite 的 round-trip 會讓 `30m` 變成 `30.0`，已由 `NormalizedDecimalConverter` 處理。
+我原先在文件與程式碼註解中寫「SQLite 把 decimal 存成 TEXT，資料庫層無法正確比較或排序」，
+並打算為此加一條約束測試。實測後發現**這個說法是錯的**：EF Core 的 SQLite provider 會在連線上
+註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMAL` collation，透過 EF 下的比較、排序、加總都正確。
+
+```sql
+WHERE ef_compare("i"."OnHandQty", '50.0') > 0
+ORDER BY "i"."OnHandQty" COLLATE EF_DECIMAL
+```
+
+那條「約束」不存在，所以也不需要為它加保護 —— 加了就是在防一個不存在的問題。
+改為加一條 `SqliteDecimalBehaviourTests` 把真實行為釘住，換 provider 或 EF 版本改變行為時會紅。
+
+**真正的限制**是這些函式只存在於 EF Core 開的連線：用 `sqlite3` CLI、DB browser
+或手寫原生 SQL 查同一個檔案時，TEXT 會退回字典序，`"9"` 會大於 `"100"`。
+目前沒有任何原生 SQL，這條限制暫時不影響什麼，但要寫進文件以免日後有人加了原生查詢。
+
+round-trip 保留小數位數（`30m` → `30.0`）的問題是真的，已由 `NormalizedDecimalConverter` 處理。
+
+**這件事本身值得記錄**：文件裡一句沒實測就寫下的「常識」，差點導致一條保護不存在問題的測試。
 
 決策點見 3.2。
 
@@ -194,14 +209,18 @@ log 是給人看的那樣讀不出來查了什麼。五條測試涵蓋，包含�
 原規劃的 Phase 4 是「示範對話腳本、curl/Postman 範例、README 架構決策說明」。
 README 目前已涵蓋架構決策與 curl 範例，所以 Phase 4 收斂成：
 
-| 工作 | 說明 |
+| 工作 | 狀態 |
 |---|---|
-| **關閉真實 API 驗證缺口**（優先） | 帶真金鑰跑一輪完整問答，確認 Anthropic 接受我們送的請求格式。這是目前唯一「編譯過、測試過、但沒真的跑過」的環節 |
-| 示範對話腳本 | 3–4 組問答，涵蓋：單一工具查詢、多階 BOM 可製造量、風險工單＋採購建議（兩個工具接力）、查無資料時的誠實回覆 |
-| 面試問答準備 | 針對「為什麼 Domain 不碰 AI」「為什麼工具都唯讀」「怎麼防止 AI 編數字」「為什麼用 SQLite」各準備一段可講的答案，每段都要指得出對應的程式碼或測試 |
-| 可觀測性展示 | 依賴 G5 完成。跑一次問答，把 log 貼出來展示「AI 每一步呼叫了什麼工具、參數是什麼、花了多久」 |
+| 關閉真實 API 驗證缺口 | **未完成 —— 需要 Anthropic API 金鑰**，開發機沒有 |
+| 示範對話腳本 | 完成。六組 curl，輸出都是實際跑出來貼上的 |
+| 面試問答準備 | 完成。八題，每題都指得出對應的程式碼或測試 |
+| 可觀測性展示 | 完成（`demo-and-interview.md` 第 3.7 節） |
 
-估計 1–2 次工作階段。
+產出：`docs/demo-and-interview.md`。
+
+**兩個決策已拍板：維持 SQLite、維持單行採購單。**
+決策一原本承諾的配套（把 decimal 約束變成 CI 保護的測試）在實測後取消 —— 見 2.4 節，
+那條約束不存在，改為 `SqliteDecimalBehaviourTests` 釘住真實行為。
 
 ---
 

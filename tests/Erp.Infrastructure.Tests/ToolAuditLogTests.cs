@@ -59,7 +59,7 @@ public class ToolAuditLogTests : IAsyncLifetime
         => _dispatcher.ExecuteAsync(toolName, JsonSerializer.SerializeToElement(arguments));
 
     private LogEntry SingleAuditEntry()
-        => Assert.Single(_logger.Entries.Where(e => e.Level == LogLevel.Information));
+        => Assert.Single(_logger.Entries, e => e.Level == LogLevel.Information);
 
     [Fact]
     public async Task 成功的呼叫會留下工具名稱_參數_耗時與成功狀態()

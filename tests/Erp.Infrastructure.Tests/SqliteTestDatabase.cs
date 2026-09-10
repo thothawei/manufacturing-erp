@@ -28,6 +28,9 @@ public sealed class SqliteTestDatabase : IAsyncDisposable
 
     public ErpDbContext Db { get; }
 
+    /// 測試需要自建 context 時共用同一條連線
+    public SqliteConnection RawConnection => _connection;
+
     /// 需要驗證「寫進去再讀出來」時，用另一個 context 讀，避免 EF 的追蹤快取讓測試失真
     public ErpDbContext CreateContext()
         => new(new DbContextOptionsBuilder<ErpDbContext>().UseSqlite(_connection).Options);

@@ -15,6 +15,7 @@ tests/
   Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
+  demo-and-interview.md            展示腳本與面試問答
   ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
   ai-assistant-module-plan-v2.md   動工前的設計規劃（歷史）
 ```
@@ -53,7 +54,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 1 — AI 工具背後的查詢／計算服務 | 完成，含 EF Core 資料層與種子資料 |
 | Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成；**尚未對真實 API 驗證過**（見下方） |
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
-| Phase 4 — 展示準備 | 未開始 |
+| Phase 4 — 展示準備 | 完成（`docs/demo-and-interview.md`）；真實 API 驗證待金鑰 |
 
 ### Phase 1 已完成的服務
 
@@ -232,8 +233,20 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
   注入呼叫者身分並下推到查詢服務。
 
-## SQLite 的一個限制
+## SQLite 的 decimal
 
-EF Core 把 `decimal` 存成 TEXT，資料庫層無法正確比較或排序數量欄位。
-因此所有對數量的比較、加總、排序都必須在載入到記憶體之後才做，
-查詢條件只用字串、日期與列舉 —— 各 Repository 都遵守這條，改動時要留意。
+`decimal` 欄位的型別是 TEXT，但**透過 EF Core 查詢時比較、排序、加總都是正確的** ——
+SQLite provider 會在連線上註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMAL` collation，
+產生的 SQL 長這樣：
+
+```sql
+WHERE ef_compare("i"."OnHandQty", '50.0') > 0
+ORDER BY "i"."OnHandQty" COLLATE EF_DECIMAL
+```
+
+`SqliteDecimalBehaviourTests` 把這個行為釘住，換 provider 或 EF 版本改變行為時會紅。
+
+要留意的是這些函式**只存在於 EF Core 開的連線**。用 `sqlite3` CLI、DB browser 或手寫原生 SQL
+查同一個檔案時，TEXT 會退回字典序比較，`"9"` 會大於 `"100"`。所以原生 SQL 不要碰數量欄位的比較與排序。
+
+另外 round-trip 會保留小數位數（`30m` 存進去讀出來變 `30.0`），由 `NormalizedDecimalConverter` 處理。
