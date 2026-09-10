@@ -6,11 +6,11 @@ namespace Erp.Api.Tests;
 
 /// 每個測試類別一個獨立的 SQLite 檔，避免互相干擾。
 ///
-/// 已知觀察：這個測試專案剛建立後的第一次執行曾出現一次失敗，
-/// 錯誤是啟動 seeding 時的 SqliteException。之後連續五次執行都通過，無法重現。
-/// 已排除的原因：seeder 併發呼叫是安全的（第二個進來時 Items 已非空）、
-/// 每個 factory 的連線字串確實指向各自的臨時檔（驗證過）。
-/// 根因未確定，若再次出現請從這裡查起。
+/// 曾經的 flaky（已修）：症狀是「每個 build 組態的第一次執行才失敗」，
+/// 錯誤 UNIQUE constraint failed: bom_lines...。
+/// 根因是 WebApplicationFactory 會建立 host 不只一次，冷啟動時兩次 seeding 真正重疊，
+/// 雙方都通過了「是否已有資料」的檢查；熱身後第一次太快完成，第二次就只看到資料而跳過。
+/// 修在 ErpDbSeeder（容忍併發衝突），由 SeederConcurrencyTests 把關。
 ///
 /// AI 助理的 BaseUrl 指向一個沒有服務在聽的埠 —— 這樣測 AI 端點的錯誤路徑時
 /// 會走到連線失敗，不會真的打 Anthropic API（不花錢、不依賴網路）。
