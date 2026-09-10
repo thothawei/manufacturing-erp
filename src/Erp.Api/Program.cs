@@ -1,4 +1,5 @@
 using Erp.Application;
+using Erp.Application.Abstractions;
 using Erp.Application.Bom;
 using Erp.Application.Common;
 using Erp.Application.Inventory;
@@ -8,6 +9,7 @@ using Erp.Application.Production;
 using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure;
+using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
@@ -24,6 +26,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddAiAssistant(builder.Configuration);
 
 var app = builder.Build();
 
@@ -37,6 +40,27 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+// AI 助理：Phase 2 的端到端入口。單輪問答，無對話上下文（已知限制）
+app.MapPost("/api/ai-assistant/ask", async (
+        AskRequest request, IAiAssistantService assistant, CancellationToken ct) =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Question))
+        {
+            return Results.BadRequest(new { error = "question 不可為空" });
+        }
+
+        try
+        {
+            var answer = await assistant.AskAsync(request.Question, ct);
+            return Results.Ok(new { answer });
+        }
+        catch (LlmUnavailableException ex)
+        {
+            // AI 服務不可用是外部依賴問題，回 503 而不是 500，訊息也不帶 SDK 內部細節
+            return Results.Problem(title: "AI 助理暫時無法使用", detail: ex.Message, statusCode: 503);
+        }
+    });
 
 // 以下端點目前是給人驗證資料層用的；Phase 2 的 AI 助理會改用同一批 Application 服務
 app.MapGet("/api/items/search", async (string keyword, ItemMasterQueryService service, CancellationToken ct)
@@ -74,3 +98,5 @@ app.Run();
 
 // 讓整合測試能參考這個 Program 類別
 public partial class Program;
+
+public sealed record AskRequest(string Question);

@@ -7,14 +7,18 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 ```
 src/
   Erp.Domain          實體與領域規則，不依賴任何外部套件
-  Erp.Application     使用案例服務 + Repository 介面（port）
-  Erp.Infrastructure  Persistence 與（Phase 2 起）Infrastructure.AI
+  Erp.Application     使用案例服務 + Repository 介面與 IAiAssistantService（port）
+  Erp.Infrastructure  Persistence（EF Core）與 AI（Anthropic tool-use）兩個平行子系統
   Erp.Api             HTTP 端點
 tests/
-  Erp.Application.Tests   Application 層單元測試（以 in-memory 假 Repository 驅動）
+  Erp.Application.Tests      Application 層單元測試（以 in-memory 假 Repository 驅動）
+  Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
 docs/
   ai-assistant-module-plan-v2.md   AI 助理模組規劃（v2）
 ```
+
+Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Application，實作在 `Infrastructure/AI`，
+與 `Infrastructure/Persistence` 平行，跟既有的 Repository 一樣是依賴反轉。
 
 依賴方向固定為 `Api → Infrastructure → Application → Domain`，Domain 不知道上層存在。
 
@@ -44,8 +48,8 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 | 階段 | 狀態 |
 |---|---|
-| Phase 1 — AI 工具背後的查詢／計算服務 | 完成，含 EF Core 資料層、種子資料與 58 個測試 |
-| Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 未開始 |
+| Phase 1 — AI 工具背後的查詢／計算服務 | 完成，含 EF Core 資料層與種子資料 |
+| Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成，接上 2 個工具；**尚未對真實 API 驗證過**（見下方） |
 | Phase 3 — 補完 8 個工具與防幻覺測試 | 未開始 |
 | Phase 4 — 展示準備 | 未開始 |
 
@@ -69,6 +73,44 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 1. **可行性計算一律以 `AvailableQty`（帳上 − 已保留）為基準**，不使用帳上庫存。用帳上庫存會把別張工單保留的料重複計入，導致「系統說夠、現場缺料」。
 2. **`RequiredPerFinishedUnit` 的分母是最終成品一個單位**，多階 BOM 的中間階用量會逐層累乘。例如 `TV-100 → CHASSIS-02 ×3 → SCREW-05 ×4`，螺絲對成品的用量是 12 而不是 4。
 3. **BOM 展開一律展到葉節點原料，不動用半成品既有庫存。** 這會低估可製造量但不會高估，對交期判斷是安全方向。
+
+## AI 助理（Phase 2）
+
+需要 Anthropic API 金鑰，設為環境變數即可：
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+dotnet run --project src/Erp.Api --urls http://localhost:5199
+```
+
+```bash
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' -d '{"question":"面板還有多少可以用？"}'
+```
+
+沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
+
+### 組成
+
+| 類別 | 職責 |
+|---|---|
+| `ILlmClient` + `Llm*` 中性模型 | 供應商抽象。換一家 LLM 只要換 `AnthropicLlmClient`，迴圈與工具定義都不動 |
+| `AnthropicLlmClient` | 官方 Anthropic C# SDK 的型別轉換；把 SDK 例外轉成 `LlmUnavailableException` |
+| `ToolCatalog` | 工具的名稱、說明與 JSON Schema，集中一份 |
+| `ToolDispatcher` | 工具名稱 → 呼叫既有 Application Service，序列化成 snake_case JSON |
+| `AiAssistantService` | tool-use 迴圈，輪數上限預設 5 |
+| `UnicodeNormalizingHandler` | 見下方「中文逃逸」 |
+
+目前接上 `search_items` 與 `get_item_inventory_status` 兩個工具，其餘六個在 Phase 3 補齊。
+
+### 兩個實作上踩到的點
+
+**中文逃逸**：SDK 內部用預設 JSON 編碼器，會把中文逃逸成 `\uXXXX`。系統提示詞、
+工具說明、使用者問題都是中文，實測請求體積變成 2.28 倍（2038 → 893 字元），
+而工具說明每一輪都重送。SDK 沒有序列化設定點，因此用 `DelegatingHandler`
+在送出前重新序列化一次，JSON 語意不變。`AnthropicWireFormatTests` 守住這條。
+
+**工具參數不是單一 JSON 值**：`BetaToolUseBlockParam.Input` 的型別是屬性字典，
+把 `JsonElement` 直接丟進去編不過，回送 tool_use 時要展開。
 
 ## 展示資料
 
@@ -103,7 +145,13 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）
 - **工單風險的預設區間是本週**：逾期超過一週且未結案的工單不會出現在預設查詢中，
   需自行指定 `from`。MRP 則已把所有逾期未結案工單納入。
-- **AI 助理為單輪問答**，無對話上下文。
+- **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
+  `AskAsync` 預留了加 `conversation_id` 的空間，Phase 3 再視情況實作。
+- **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由 38 個測試涵蓋，
+  送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
+  （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
+- **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
+  注入呼叫者身分並下推到查詢服務。
 
 ## SQLite 的一個限制
 
