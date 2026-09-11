@@ -49,13 +49,14 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 啟動時會印出 AI 助理的生效設定：
 
 ```
-AI 助理設定：模型 claude-opus-5，工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：未設定（將交由 SDK 自行解析憑證，若無憑證會回 503）
+AI 助理設定：模型 auto，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：未設定（將交由 SDK 自行解析憑證，若無憑證會回 503）
 ```
 
-要用 AI 助理才需要金鑰：
+端點那一段是預設走本機 OmniRoute gateway 的結果（見 README「AI 助理」）；
+沒設 `BaseUrl` 時會印「Anthropic 官方」。要用 AI 助理才需要金鑰：
 
 ```bash
-dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
+dotnet user-secrets set "AiAssistant:ApiKey" "sk-..." --project src/Erp.Api
 ```
 
 金鑰存在專案外（`~/.microsoft/usersecrets/`），不可能被誤 commit —— 這個 repo 是公開的。

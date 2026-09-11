@@ -91,8 +91,9 @@ if (app.Environment.IsDevelopment())
 // 沒有這行的話，「user-secrets 到底有沒有被讀到」只能靠猜。
 var aiOptions = app.Services.GetRequiredService<IOptions<AiAssistantOptions>>().Value;
 app.Logger.LogInformation(
-    "AI 助理設定：模型 {Model}，工具迴圈上限 {MaxIterations} 輪，逾時 {TimeoutSeconds} 秒，API 金鑰來源：{KeySource}",
-    aiOptions.Model, aiOptions.MaxToolIterations, aiOptions.TimeoutSeconds, DescribeKeySource(aiOptions));
+    "AI 助理設定：模型 {Model}，端點 {Endpoint}，工具迴圈上限 {MaxIterations} 輪，逾時 {TimeoutSeconds} 秒，API 金鑰來源：{KeySource}",
+    aiOptions.Model, DescribeEndpoint(aiOptions), aiOptions.MaxToolIterations, aiOptions.TimeoutSeconds,
+    DescribeKeySource(aiOptions));
 
 // 同理：沒有這行的話，「RAG 索引到底有沒有建起來」只能靠猜，
 // 而它建不起來時的症狀是一個工具回錯誤，不是啟動失敗
@@ -195,6 +196,19 @@ public sealed record AskRequest(string Question);
 
 public partial class Program
 {
+    /// 打官方還是打本機 gateway，是最容易設錯又最難從回應看出來的一件事 ——
+    /// gateway 沒開時只會得到一句「無法連線」，看不出它本來想連去哪
+    private static string DescribeEndpoint(AiAssistantOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.BaseUrl))
+        {
+            return "Anthropic 官方";
+        }
+
+        var fallback = options.UseServerSideFallback ? "開啟" : "關閉";
+        return $"{options.BaseUrl}（server-side refusal fallback {fallback}）";
+    }
+
     /// 只回報金鑰「從哪裡來」，永遠不印出金鑰本身
     private static string DescribeKeySource(AiAssistantOptions options)
     {

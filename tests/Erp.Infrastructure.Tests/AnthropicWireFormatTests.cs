@@ -21,6 +21,17 @@ public class AnthropicWireFormatTests
             TimeoutSeconds = timeoutSeconds
         }));
 
+    /// 打 gateway 的設定：其餘跟 CreateClient 一樣，只差在關掉 refusal fallback
+    private static AnthropicLlmClient CreateGatewayClient(string baseUrl) => new(Options.Create(
+        new AiAssistantOptions
+        {
+            ApiKey = "sk-ant-test-key-not-real",
+            BaseUrl = baseUrl,
+            Model = "claude-opus-5",
+            MaxTokens = 8_000,
+            UseServerSideFallback = false
+        }));
+
     private static LlmRequest SampleRequest(params LlmMessage[] messages)
         => new("系統提示詞內容", messages, ToolCatalog.All);
 
@@ -61,6 +72,21 @@ public class AnthropicWireFormatTests
         using var body = JsonDocument.Parse(server.ReceivedBodies[0]);
         var fallbacks = body.RootElement.GetProperty("fallbacks");
         Assert.Equal("claude-opus-4-8", fallbacks[0].GetProperty("model").GetString());
+    }
+
+    /// OmniRoute 這類相容 gateway 不認得 fallbacks，多送一個它看不懂的欄位
+    /// 可能被擋下來；關掉之後要確認是「整個不見」而不是送成 null
+    [Fact]
+    public async Task 關掉refusal_fallback時beta旗標與參數都不會出現在請求裡()
+    {
+        using var server = new FakeAnthropicServer(FakeAnthropicServer.TextResponse("好的"));
+
+        await CreateGatewayClient(server.BaseUrl).SendAsync(SampleRequest(LlmMessage.User("測試")));
+
+        Assert.Equal(string.Empty, Assert.Single(server.ReceivedBetaHeaders));
+
+        using var body = JsonDocument.Parse(Assert.Single(server.ReceivedBodies));
+        Assert.False(body.RootElement.TryGetProperty("fallbacks", out _));
     }
 
     [Fact]

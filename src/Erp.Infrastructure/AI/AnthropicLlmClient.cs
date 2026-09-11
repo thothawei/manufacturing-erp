@@ -9,6 +9,8 @@ namespace Erp.Infrastructure.AI;
 /// ILlmClient 的 Anthropic 實作。
 /// 只做兩件事：把中性模型轉成 SDK 型別送出，再把回應轉回中性模型。
 /// 換成別家 LLM 時只要換掉這個類別，tool-use 迴圈與工具定義都不用動。
+/// 端點可以是 Anthropic 官方，也可以是 OmniRoute 這類 Anthropic 相容 gateway
+/// —— 兩者的差別只在設定，見 AiAssistantOptions 的 BaseUrl 與 UseServerSideFallback。
 public sealed class AnthropicLlmClient : ILlmClient
 {
     /// 伺服器端 refusal fallback：安全分類器拒絕時自動改由備援模型作答，
@@ -81,18 +83,41 @@ public sealed class AnthropicLlmClient : ILlmClient
 
     private async Task<LlmResponse> SendCoreAsync(LlmRequest request, CancellationToken ct)
     {
-        var response = await _client.Beta.Messages.Create(new MessageCreateParams
+        var response = await _client.Beta.Messages.Create(BuildParams(request));
+
+        return new LlmResponse([.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()]);
+    }
+
+    /// refusal fallback 只有 Anthropic 官方端點吃得下，打 gateway 時整組省略。
+    /// 理由跟建構式那邊一樣：不要的項目要整個不出現在初始設定式裡 ——
+    /// 設成 null 不是「沒送」，SDK 會照樣把 "fallbacks": null 寫進請求本文。
+    private MessageCreateParams BuildParams(LlmRequest request)
+    {
+        List<BetaToolUnion> tools = [.. request.Tools.Select(ToSdkTool)];
+        List<BetaMessageParam> messages = [.. request.Messages.Select(ToSdkMessage)];
+
+        if (!_options.UseServerSideFallback)
+        {
+            return new MessageCreateParams
+            {
+                Model = _options.Model,
+                MaxTokens = _options.MaxTokens,
+                System = request.SystemPrompt,
+                Tools = tools,
+                Messages = messages
+            };
+        }
+
+        return new MessageCreateParams
         {
             Model = _options.Model,
             MaxTokens = _options.MaxTokens,
             System = request.SystemPrompt,
             Betas = [ServerSideFallbackBeta],
             Fallbacks = new BetaFallbacksParam(new BetaFallbackParam[] { new() { Model = FallbackModel } }),
-            Tools = [.. request.Tools.Select(ToSdkTool)],
-            Messages = [.. request.Messages.Select(ToSdkMessage)]
-        });
-
-        return new LlmResponse([.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()]);
+            Tools = tools,
+            Messages = messages
+        };
     }
 
     private static BetaToolUnion ToSdkTool(ToolDefinition tool) => new BetaTool

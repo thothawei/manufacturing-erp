@@ -124,26 +124,44 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ## AI 助理
 
-需要 Anthropic API 金鑰。本機開發用 user-secrets（存在專案外，不可能被誤 commit）：
+預設不直接打 Anthropic 官方，而是走本機的 [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway。
+`AnthropicLlmClient` 的轉換程式碼一行都不用改：OmniRoute 有 Anthropic 相容的
+`/v1/messages` 端點，只要把 `AiAssistant:BaseUrl` 指到它的根網址，
+`/v1/messages` 這段由 SDK 自己接上去。
 
 ```bash
-dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
+npm install -g omniroute && omniroute   # 另開一個終端機跑著，預設 20128 埠
 ```
 
-macOS 上也可以先把金鑰複製到剪貼簿，再執行 `./scripts/set-api-key.sh` ——
-它會檢查前綴與長度後才寫入，避免把錯的東西存進去（金鑰不會顯示在畫面或 shell history）。
-
-或用環境變數（正式環境的做法）：
+金鑰改填 OmniRoute 儀表板 → Endpoints 的那一把（格式是 `sk-<machineId>-<keyId>-<crc>`）。
+本機開發用 user-secrets（存在專案外，不可能被誤 commit）：
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+dotnet user-secrets set "AiAssistant:ApiKey" "sk-..." --project src/Erp.Api
 ```
 
-兩者都不要寫進 `appsettings.json`。啟動時會印出生效的設定與金鑰來源（只印來源、不印值）：
+`./scripts/set-api-key.sh` 只收 `sk-ant-` 開頭的官方金鑰，擋掉貼錯東西的情況 ——
+OmniRoute 的金鑰請用上面那行直接寫入。金鑰不要寫進 `appsettings.json`。
+
+模型代號也是 OmniRoute 的：`auto` 是交給它按當下可用的 provider 自動選
+（帶 `tools` 的請求會走它的 tool-bearing bypass，轉給單一模型處理，tool-use 不會被拆散），
+要釘死某個模型就寫 `anthropic/claude-opus-5` 這種帶 provider 前綴的完整代號。
+
+啟動時會印出生效的設定、端點與金鑰來源（只印來源、不印值）：
 
 ```
-AI 助理設定：模型 claude-opus-5，工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
+AI 助理設定：模型 auto，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
 ```
+
+### 改回直接打 Anthropic 官方
+
+`appsettings.json` 的 `AiAssistant` 拿掉 `BaseUrl`、`UseServerSideFallback` 設回 `true`、
+`Model` 改回 `claude-opus-5`，金鑰換成 `sk-ant-...`（或環境變數 `ANTHROPIC_API_KEY`）即可。
+
+`UseServerSideFallback` 管的是 Anthropic 的 server-side refusal fallback ——
+安全分類器拒答時自動改由 `claude-opus-4-8` 作答。那是官方端點才有的請求參數，
+所以打 gateway 時 beta 旗標與 `fallbacks` 整組不送（不是送成 `null`，是整個欄位不出現），
+備援交給 OmniRoute 自己的路由做。兩層備援疊在一起只會讓「這句話是誰答的」變得無法追。
 
 ```bash
 dotnet run --project src/Erp.Api --urls http://localhost:5199
