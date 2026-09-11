@@ -53,6 +53,16 @@ public class AiAssistantServiceTests : IAsyncLifetime
         Assert.Contains("\"available_qty\":80", toolResult.Content);
     }
 
+    /// 空字串不是答案。會走到這裡的是「整個回應只有 thinking 區塊」，
+    /// 或 gateway 的空內容佔位符被 LLM client 丟掉之後什麼都不剩
+    [Fact]
+    public async Task LLM沒有回覆內容時給出說得清楚的訊息而不是空字串()
+    {
+        var answer = await CreateService(new FakeLlmClient(new LlmResponse([]))).AskAsync("面板還有多少？");
+
+        Assert.Equal("AI 這次沒有回覆任何內容，請換個問法再試一次。", answer);
+    }
+
     [Fact]
     public async Task 工具回傳的JSON使用snake_case欄位名()
     {

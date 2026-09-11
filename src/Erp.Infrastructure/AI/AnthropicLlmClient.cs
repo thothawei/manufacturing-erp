@@ -18,6 +18,13 @@ public sealed class AnthropicLlmClient : ILlmClient
     private const string ServerSideFallbackBeta = "server-side-fallback-2026-06-01";
     private const string FallbackModel = "claude-opus-4-8";
 
+    /// OmniRoute 在上游回空內容時會補一個寫死這句話的 text 區塊
+    /// （open-sse/handlers/responseTranslator.ts，沒有開關可以關掉）。
+    /// 官方端點不會有這一塊，留著它有兩個後果：它會被當成 assistant 的發言
+    /// 回送進對話歷史，而且「上游沒給內容」會變成一句使用者看不懂的英文佔位符。
+    /// 實測確認過的行為，見 README「AI 助理」。
+    private const string GatewayEmptyPlaceholder = "(empty response)";
+
     private readonly AnthropicClient _client;
     private readonly AiAssistantOptions _options;
 
@@ -168,7 +175,7 @@ public sealed class AnthropicLlmClient : ILlmClient
     {
         if (block.TryPickText(out BetaTextBlock? text))
         {
-            return new LlmTextBlock(text.Text);
+            return text.Text == GatewayEmptyPlaceholder ? null : new LlmTextBlock(text.Text);
         }
 
         if (block.TryPickToolUse(out BetaToolUseBlock? toolUse))

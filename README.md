@@ -149,6 +149,11 @@ OmniRoute 的金鑰請用上面那行直接寫入。金鑰不要寫進 `appsetti
 換成 `auto` 是交給它按當下可用的 provider 自動選（帶 `tools` 的請求會走它的
 tool-bearing bypass，轉給單一模型處理，tool-use 不會被拆散），但路由到哪個模型是 runtime 才知道的事。
 
+跟官方端點有一個行為差異是實測出來、程式碼有處理的：上游 provider 回空內容時，
+OmniRoute 會補一個寫死 `(empty response)` 的 text 區塊（官方端點只會回 `tool_use`，
+不補這一塊）。`AnthropicLlmClient` 會把這個佔位符丟掉，`AiAssistantService` 則在
+最終回應完全沒有文字時回一句說得清楚的話，不會把英文佔位符或空字串當成答案送出去。
+
 啟動時會印出生效的設定、端點與金鑰來源（只印來源、不印值）：
 
 ```

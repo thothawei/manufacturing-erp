@@ -33,7 +33,12 @@ public sealed class AiAssistantService(
 
             if (!response.RequiresToolExecution)
             {
-                return response.Text;
+                // 沒有工具呼叫、也沒有文字 —— 例如整個回應只有 thinking 區塊，
+                // 或 gateway 的空內容佔位符在 LLM client 那層被丟掉了。
+                // 空字串不是答案，直接回傳的話使用者只會看到一片空白
+                return string.IsNullOrWhiteSpace(response.Text)
+                    ? "AI 這次沒有回覆任何內容，請換個問法再試一次。"
+                    : response.Text;
             }
 
             // LLM 可能一次要求多個工具。所有結果必須放進「同一則」使用者訊息回覆，

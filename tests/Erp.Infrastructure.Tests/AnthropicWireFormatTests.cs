@@ -177,6 +177,20 @@ public class AnthropicWireFormatTests
         Assert.Equal("面板目前可用庫存 80 片。", response.Text);
     }
 
+    /// 實測 OmniRoute 的行為：上游回空內容時，它會補一個寫死 "(empty response)"
+    /// 的 text 區塊，官方端點不會這樣做。留著它會變成 assistant 說過的話
+    [Fact]
+    public async Task gateway的空內容佔位符不會被當成答案()
+    {
+        using var server = new FakeAnthropicServer(FakeAnthropicServer.TextResponse("(empty response)"));
+
+        var response = await CreateClient(server.BaseUrl)
+            .SendAsync(SampleRequest(LlmMessage.User("庫存")));
+
+        Assert.Empty(response.Content);
+        Assert.Equal(string.Empty, response.Text);
+    }
+
     [Fact]
     public async Task 中文不會被逃逸成unicode跳脫序列()
     {
