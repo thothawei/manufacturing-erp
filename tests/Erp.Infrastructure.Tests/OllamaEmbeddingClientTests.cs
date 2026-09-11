@@ -10,7 +10,7 @@ namespace Erp.Infrastructure.Tests;
 public class OllamaEmbeddingClientTests
 {
     private static OllamaEmbeddingClient CreateClient(
-        string baseUrl, string model = "nomic-embed-text", int timeoutSeconds = 10)
+        string baseUrl, string model = "bge-m3", int timeoutSeconds = 10)
         => new(Options.Create(new RagOptions
         {
             OllamaBaseUrl = baseUrl,
@@ -22,13 +22,13 @@ public class OllamaEmbeddingClientTests
     public async Task 送出的請求符合Ollama的embeddings介面()
     {
         using var server = new FakeOllamaServer();
-        using var client = CreateClient(server.BaseUrl, "nomic-embed-text");
+        using var client = CreateClient(server.BaseUrl, "bge-m3");
 
         var vector = await client.EmbedAsync("面板色偏怎麼判定");
 
         Assert.Equal("POST", server.ReceivedMethods[0]);
         Assert.Equal("/api/embeddings", server.ReceivedPaths[0]);
-        Assert.Contains("\"model\":\"nomic-embed-text\"", server.ReceivedBodies[0]);
+        Assert.Contains("\"model\":\"bge-m3\"", server.ReceivedBodies[0]);
         Assert.Contains("\"prompt\":", server.ReceivedBodies[0]);
         Assert.Equal([0.1f, 0.2f, 0.3f, 0.4f], vector);
     }
