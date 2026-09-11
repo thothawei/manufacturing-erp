@@ -18,7 +18,8 @@ public sealed class AiAssistantOptions
     public bool UseServerSideFallback { get; set; } = true;
 
     /// 打官方端點時是 Anthropic 的模型代號；打 OmniRoute 時是它的模型代號
-    /// （auto 代表交給它自動選，也可以寫成 anthropic/claude-opus-5 指定）。
+    /// （帶 provider 前綴釘死一個，例如 anthropic/claude-opus-5；
+    /// 寫 auto 則是交給它按當下可用的 provider 自動選）。
     public string Model { get; set; } = "claude-opus-5";
 
     public int MaxTokens { get; set; } = 8_000;

@@ -143,14 +143,16 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-..." --project src/Erp.Api
 `./scripts/set-api-key.sh` 只收 `sk-ant-` 開頭的官方金鑰，擋掉貼錯東西的情況 ——
 OmniRoute 的金鑰請用上面那行直接寫入。金鑰不要寫進 `appsettings.json`。
 
-模型代號也是 OmniRoute 的：`auto` 是交給它按當下可用的 provider 自動選
-（帶 `tools` 的請求會走它的 tool-bearing bypass，轉給單一模型處理，tool-use 不會被拆散），
-要釘死某個模型就寫 `anthropic/claude-opus-5` 這種帶 provider 前綴的完整代號。
+模型代號也是 OmniRoute 的，預設釘死 `anthropic/claude-opus-5`（帶 provider 前綴的完整代號），
+所以 OmniRoute 那邊要先連好一個能出 Claude 的 provider。
+九個工具全靠 tool-use，釘死才知道是誰在答、答得好不好；
+換成 `auto` 是交給它按當下可用的 provider 自動選（帶 `tools` 的請求會走它的
+tool-bearing bypass，轉給單一模型處理，tool-use 不會被拆散），但路由到哪個模型是 runtime 才知道的事。
 
 啟動時會印出生效的設定、端點與金鑰來源（只印來源、不印值）：
 
 ```
-AI 助理設定：模型 auto，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
+AI 助理設定：模型 anthropic/claude-opus-5，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
 ```
 
 ### 改回直接打 Anthropic 官方
