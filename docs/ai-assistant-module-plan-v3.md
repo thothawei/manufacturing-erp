@@ -22,6 +22,10 @@
 | Phase 4 之後 | 完成 | REST 錯誤處理、seeding 併發修復、CI、Scalar UI、授權與格式規範（見 3.4） |
 
 測試共 166 個（Application 43／Architecture 7／Infrastructure 103／Api 13），全數通過。
+
+> **註（2026-09-11）**：這個數字是 v3 寫作當時的快照。之後新增了第 9 個工具
+> （文件語意檢索，見 [rag-module-plan-v1](rag-module-plan-v1.md)），現行數字以 `README.md` 為準。
+
 建置與格式檢查都在 CI 上跑，警告視為錯誤。
 分層邊界由 `Erp.ArchitectureTests` 保護：Domain 不得相依其他層、不得參考 EF Core 或任何 LLM 廠商套件。
 

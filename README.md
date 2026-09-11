@@ -480,17 +480,36 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 | job | 做什麼 | 為什麼分開 |
 |---|---|---|
 | `build-and-test` | 格式檢查 → Release 建置（警告視為錯誤）→ 全部測試 | 快速回饋。它不需要 Ollama，那 9 個檢索品質測試在這裡是 skip |
-| `retrieval-quality` | 裝 Ollama、pull `bge-m3`、只跑 `RetrievalQualityTests` | 會下載 1.2 GB 模型，比主 job 慢。分開之後它紅燈的原因沒有模糊空間：要嘛模型選得不對、要嘛環境沒裝起來 |
+| `retrieval-quality` | 裝 Ollama、pull `bge-m3`、只跑 `RetrievalQualityTests` | 約 3.5 分鐘，比主 job 慢。分開之後它紅燈的原因沒有模糊空間：要嘛模型選得不對、要嘛環境沒裝起來 |
 
-`retrieval-quality` 有三個容易做錯、做錯了又不會報錯的地方：
+`retrieval-quality` 的兩個關鍵設計：
 
-1. **模型路徑**：Linux 的安裝腳本會建立一個 `ollama` 系統使用者並以 systemd 啟動，
-   模型落在 `/usr/share/ollama/.ollama/models`。快取路徑寫 `~/.ollama/models` 會永遠是空的，
-   而症狀只是「每次都重新下載 1.2 GB」，沒有任何錯誤訊息。
-   解法是用 `OLLAMA_MODELS` 指定路徑，並停掉 systemd 那個行程（它讀不到這個變數）。
-2. **不准 skip**：`RAG_REQUIRE_OLLAMA=1`。少了它，上面任何一步悄悄失敗都會讓測試變成
-   skip 而 job 綠 —— 假防線比沒有防線更糟。
-3. **等服務起來**而不是盲等固定秒數，失敗時把 `ollama serve` 的 log 印出來。
+1. **不准 skip**：`RAG_REQUIRE_OLLAMA=1`。測試在 Ollama 不可用時會自動 skip，
+   所以少了這個開關，安裝步驟只要悄悄失敗一次，整組就變成 skip 而 job 照樣綠 ——
+   **假防線比沒有防線更糟**，因為它會讓人停止懷疑。
+   實測：停掉 Ollama 並設這個變數，9 條全紅、0 skip。
+2. **等服務真的起來**（輪詢 `/api/tags`）而不是盲等固定秒數，失敗時印出 `ollama serve` 的 log。
+
+### 為什麼不快取那 1.2 GB 的模型
+
+一開始加了 `actions/cache`，實測之後移掉 —— **它是負收益**：
+
+| 步驟 | 無快取 | 有快取 |
+|---|---|---|
+| 還原／儲存快取 | 1 + 5 秒 | **8 + 0 秒** |
+| 安裝 Ollama | 59 秒 | 76 秒 |
+| **`ollama pull bge-m3`** | **5 秒** | 1 秒 |
+| 執行測試（CPU 跑 embedding） | 133 秒 | 121 秒 |
+
+**`pull` 只花 5 秒**（runner 在 Azure，1.2 GB ÷ 5 秒 ≈ 240 MB/s）。
+快取省下 4 秒、花掉 13 秒。我原本假設「下載 1.2 GB 是瓶頸」，那是錯的 ——
+時間花在安裝 Ollama 與 CPU 跑 embedding 上。
+
+移掉快取連帶移掉了一整套只為它而存在的複雜度：原本要用 `OLLAMA_MODELS` 指定模型路徑，
+因為 Linux 安裝腳本會建立 `ollama` 系統使用者、把模型放到
+`/usr/share/ollama/.ollama/models`，快取 `~/.ollama/models` 會永遠是空的 ——
+而那個錯誤的症狀只是「每次都重新下載」，不會有任何錯誤訊息。
+（這個陷阱本身仍然成立，只是現在沒有快取需要它了。）
 
 ## 架構邊界
 

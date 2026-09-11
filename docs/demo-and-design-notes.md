@@ -82,12 +82,13 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 166 個測試
+dotnet test                          # 255 個測試（本機有 Ollama 時 264）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
 
-三者都由 GitHub Actions 在每次 push 與 PR 上執行（Release 組態）。
+三者都由 GitHub Actions 在每次 push 與 PR 上執行（Release 組態），
+另有一個 `retrieval-quality` job 裝 Ollama 跑那 9 個檢索品質測試。
 格式規範是 C# 4 空格、專案檔與 JSON/YAML 2 空格、統一 LF 換行；
 Markdown 不砍行尾空白（那是換行語法），EF 產生的 migration 標記為 generated code 不套用規範。
 
