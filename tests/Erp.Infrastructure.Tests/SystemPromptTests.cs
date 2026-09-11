@@ -16,6 +16,8 @@ public class SystemPromptTests
     [InlineData("INVALID_ARGUMENT", "參數錯誤的錯誤碼處理")]
     [InlineData("NOT_APPLICABLE", "問法不適用的錯誤碼處理")]
     [InlineData("INTERNAL_ERROR", "系統錯誤的錯誤碼處理")]
+    [InlineData("SERVICE_UNAVAILABLE", "外部服務不可用的錯誤碼處理")]
+    [InlineData("search_documents", "文件語意檢索的使用時機")]
     [InlineData("available_qty", "可用庫存優先於帳上庫存")]
     [InlineData("search_items", "多筆結果要請使用者確認")]
     [InlineData("suggested_order_qty", "採購建議直接引用後端數字")]
@@ -48,6 +50,29 @@ public class SystemPromptTests
     {
         Assert.Contains("相同參數", Prompt);
         Assert.Contains("不要再用相同參數呼叫第二次", Prompt);
+    }
+
+    [Fact]
+    public void 必須禁止編造文件來源()
+    {
+        // 等價於「所有數字由後端算好」：引用座標只能來自工具回傳值。
+        // 少了這條，LLM 可以說出一個聽起來很像公司 SOP 的檔名
+        Assert.Contains("source_name", Prompt);
+        Assert.Contains("禁止自行改寫", Prompt);
+    }
+
+    [Fact]
+    public void 必須規定文件查不到時不可改用自己的知識回答()
+    {
+        Assert.Contains("chunks 為空", Prompt);
+        Assert.Contains("不可以改用你自己的知識回答", Prompt);
+    }
+
+    [Fact]
+    public void 必須禁止把相似度當成百分比轉述()
+    {
+        Assert.Contains("similarity", Prompt);
+        Assert.Contains("不要當成百分比", Prompt);
     }
 
     [Fact]

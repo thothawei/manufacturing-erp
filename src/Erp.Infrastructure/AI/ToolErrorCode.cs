@@ -20,7 +20,14 @@ public enum ToolErrorCode
     UnknownTool,
 
     /// 未預期的系統錯誤。重試沒有意義
-    InternalError
+    InternalError,
+
+    /// 工具依賴的外部服務不可用（例如文件檢索需要的本機 Ollama 沒有啟動）。
+    ///
+    /// 與 InternalError 分開是有意義的：這不是程式壞了，而是環境少裝了一個可選元件。
+    /// 合併成 InternalError 的話，LLM 只能說「查詢失敗」，
+    /// 而這其實是最常見、也最該給出明確指引的情境。
+    ServiceUnavailable
 }
 
 public static class ToolErrorCodeExtensions
@@ -34,6 +41,7 @@ public static class ToolErrorCodeExtensions
         ToolErrorCode.NotApplicable => "NOT_APPLICABLE",
         ToolErrorCode.UnknownTool => "UNKNOWN_TOOL",
         ToolErrorCode.InternalError => "INTERNAL_ERROR",
+        ToolErrorCode.ServiceUnavailable => "SERVICE_UNAVAILABLE",
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "未定義的錯誤碼")
     };
 }

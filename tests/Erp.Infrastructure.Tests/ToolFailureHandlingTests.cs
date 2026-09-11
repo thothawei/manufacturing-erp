@@ -32,26 +32,8 @@ public class ToolFailureHandlingTests
         var clock = new TestClock(Today);
         await ErpDbSeeder.SeedAsync(fixture.Db, clock);
 
-        var db = fixture.CreateContext();
-        var itemRepository = new ItemRepository(db);
-        var inventoryRepository = new InventoryRepository(db);
-        var workOrderRepository = new WorkOrderRepository(db);
-        var purchaseOrderRepository = new PurchaseOrderRepository(db);
-        var bomExplosionService = new BomExplosionService(itemRepository, new BomRepository(db), inventoryRepository);
         var logger = new CapturingLogger<ToolDispatcher>();
-
-        var dispatcher = new ToolDispatcher(
-            new ItemMasterQueryService(itemRepository),
-            new InventoryQueryService(itemRepository, inventoryRepository, clock),
-            bomExplosionService,
-            new WorkOrderProgressService(workOrderRepository),
-            new WorkOrderRiskService(workOrderRepository, itemRepository, bomExplosionService, clock),
-            new MrpCalculationService(
-                workOrderRepository, itemRepository, inventoryRepository,
-                purchaseOrderRepository, bomExplosionService, clock),
-            new PurchasingQueryService(purchaseOrderRepository),
-            new QualityInspectionQueryService(new QualityInspectionRepository(db)),
-            logger);
+        var dispatcher = TestServices.CreateDispatcher(fixture, clock, logger);
 
         // 關掉 in-memory SQLite 連線，之後任何查詢都會炸
         await fixture.DisposeAsync();
@@ -105,7 +87,7 @@ public class ToolFailureHandlingTests
     [Fact]
     public async Task 每個工具的未預期例外都被攔下()
     {
-        // 只補在某幾個 case 沒有意義，這裡把八個工具全部走一遍
+        // 只補在某幾個 case 沒有意義，這裡把目錄裡每個工具都走一遍
         foreach (var tool in ToolCatalog.All)
         {
             var (dispatcher, _) = await CreateBrokenDispatcherAsync();

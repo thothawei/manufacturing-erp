@@ -4,7 +4,7 @@ namespace Erp.Infrastructure.AI;
 
 /// 所有工具的定義集中在這裡一份。
 ///
-/// 八個工具全部都是唯讀查詢，沒有一個會寫入資料庫
+/// 九個工具全部都是唯讀查詢，沒有一個會寫入資料庫
 /// （見 docs/ai-assistant-module-plan-v2.md 第 3 節）。
 ///
 /// 每個工具的說明都寫明「數量單位」與「回傳什麼」，這是防幻覺的第一道：
@@ -19,6 +19,7 @@ public static class ToolCatalog
     public const string RunMrpShortageAnalysis = "run_mrp_shortage_analysis";
     public const string ListOpenPurchaseOrders = "list_open_purchase_orders";
     public const string GetQualityInspectionSummary = "get_quality_inspection_summary";
+    public const string SearchDocuments = "search_documents";
 
     public static readonly IReadOnlyList<ToolDefinition> All =
     [
@@ -159,7 +160,36 @@ public static class ToolCatalog
                 ["date_range_start"] = Schema(new { type = "string", description = "起始日期，格式 YYYY-MM-DD" }),
                 ["date_range_end"] = Schema(new { type = "string", description = "結束日期，格式 YYYY-MM-DD" })
             },
-            [])
+            []),
+
+        new ToolDefinition(
+            SearchDocuments,
+            """
+            以語意相似度檢索非結構化文件（品管異常處理 SOP、設備維修手冊摘要、客訴處理紀錄），
+            回答「怎麼處理」「判定標準是什麼」「以前發生過嗎」這類無法從結構化資料得到答案的問題。
+            查數量、庫存、工單、採購、品管數字請用其他工具，這個工具只回文字段落。
+            回傳 chunks（命中的段落清單，每段含 text 段落原文、source_name 來源文件名稱、
+            chunk_index 段落序號、similarity 相似度分數）、matched_count（命中段數）、
+            similarity_threshold（採用的相似度門檻）。
+            引用時必須使用 source_name 的原值，不可自行改寫或推測文件名稱。
+            相似度低於門檻的段落不會回傳，chunks 為空就代表語料中沒有足夠相關的內容，
+            此時要告訴使用者查不到，不可用自己的知識回答。
+            similarity 是給你判斷信心用的參考值，不要當成百分比轉述給使用者。
+            """,
+            new Dictionary<string, JsonElement>
+            {
+                ["query"] = Schema(new
+                {
+                    type = "string",
+                    description = "要查的問題或關鍵描述，用自然語言，例如「面板色偏怎麼判定」"
+                }),
+                ["top_k"] = Schema(new
+                {
+                    type = "integer",
+                    description = "最多回傳幾個段落，不給時預設 3，上限 10"
+                })
+            },
+            ["query"])
     ];
 
     private static JsonElement Schema(object value) => JsonSerializer.SerializeToElement(value);

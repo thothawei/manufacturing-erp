@@ -8,7 +8,10 @@ using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Persistence.Repositories;
+using Erp.Infrastructure.Rag;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Erp.Infrastructure.Tests;
 
@@ -16,7 +19,12 @@ internal static class TestServices
 {
     /// 用真的 EF Core Repository 組出完整的 ToolDispatcher。
     /// 集中一處，之後新增工具只要改這裡一個地方。
-    public static ToolDispatcher CreateDispatcher(SqliteTestDatabase fixture, IClock clock)
+    public static ToolDispatcher CreateDispatcher(
+        SqliteTestDatabase fixture,
+        IClock clock,
+        ILogger<ToolDispatcher>? logger = null,
+        IEmbeddingClient? embeddingClient = null,
+        RagOptions? ragOptions = null)
     {
         var db = fixture.CreateContext();
 
@@ -38,6 +46,24 @@ internal static class TestServices
                 purchaseOrderRepository, bomExplosionService, clock),
             new PurchasingQueryService(purchaseOrderRepository),
             new QualityInspectionQueryService(new QualityInspectionRepository(db)),
-            NullLogger<ToolDispatcher>.Instance);
+            CreateSearchService(fixture, embeddingClient ?? new FakeEmbeddingClient(), ragOptions),
+            logger ?? NullLogger<ToolDispatcher>.Instance);
     }
+
+    public static DocumentSearchService CreateSearchService(
+        SqliteTestDatabase fixture,
+        IEmbeddingClient embeddingClient,
+        RagOptions? ragOptions = null,
+        ILogger<DocumentSearchService>? logger = null)
+        => new(
+            fixture.CreateContext(),
+            embeddingClient,
+            Options.Create(ragOptions ?? new RagOptions()),
+            logger ?? NullLogger<DocumentSearchService>.Instance);
+
+    /// 用假 embedding 把展示語料灌進索引，讓檢索相關的測試離線可跑
+    public static Task<int> BuildRagIndexAsync(
+        SqliteTestDatabase fixture, IEmbeddingClient embeddingClient)
+        => new RagIndexBuilder(
+            fixture.CreateContext(), embeddingClient, NullLogger<RagIndexBuilder>.Instance).BuildAsync();
 }

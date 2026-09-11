@@ -31,26 +31,8 @@ public class ToolAuditLogTests : IAsyncLifetime
         var clock = new TestClock(Today);
         await ErpDbSeeder.SeedAsync(_fixture.Db, clock);
 
-        var db = _fixture.CreateContext();
-        var itemRepository = new ItemRepository(db);
-        var inventoryRepository = new InventoryRepository(db);
-        var workOrderRepository = new WorkOrderRepository(db);
-        var purchaseOrderRepository = new PurchaseOrderRepository(db);
-        var bomExplosionService = new BomExplosionService(itemRepository, new BomRepository(db), inventoryRepository);
         _logger = new CapturingLogger<ToolDispatcher>();
-
-        _dispatcher = new ToolDispatcher(
-            new ItemMasterQueryService(itemRepository),
-            new InventoryQueryService(itemRepository, inventoryRepository, clock),
-            bomExplosionService,
-            new WorkOrderProgressService(workOrderRepository),
-            new WorkOrderRiskService(workOrderRepository, itemRepository, bomExplosionService, clock),
-            new MrpCalculationService(
-                workOrderRepository, itemRepository, inventoryRepository,
-                purchaseOrderRepository, bomExplosionService, clock),
-            new PurchasingQueryService(purchaseOrderRepository),
-            new QualityInspectionQueryService(new QualityInspectionRepository(db)),
-            _logger);
+        _dispatcher = TestServices.CreateDispatcher(_fixture, clock, _logger);
     }
 
     public async Task DisposeAsync() => await _fixture.DisposeAsync();

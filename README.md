@@ -3,15 +3,17 @@
 [![CI](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml)
 
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
-使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
+使用者用自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
+第九個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
 
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-166 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
-發過請求（開發機沒有金鑰），詳見「尚未處理」。
+255 個測試，0 警告。**兩個未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
+發過請求（開發機沒有金鑰），`OllamaEmbeddingClient` 也還沒對真實 Ollama 發過請求
+（開發機沒裝）。兩者送出的 HTTP 請求都用本機假伺服器逐欄檢查過，詳見「尚未處理」。
 
 | 想看什麼 | 去哪裡 |
 |---|---|
@@ -19,6 +21,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 | 架構決策與踩過的坑 | 本文件以下各節 |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
 | 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
+| RAG 模組的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md) |
 | 最初的規劃長什麼樣 | [`docs/ai-assistant-module-plan-v1.md`](docs/ai-assistant-module-plan-v1.md)（動工前原貌） |
 
 規劃演進是 **v1 原始構想 → v2 動工前修訂 → v3 實作完成後對帳**。
@@ -29,7 +32,8 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 src/
   Erp.Domain          實體與領域規則，不依賴任何外部套件
   Erp.Application     使用案例服務 + Repository 介面與 IAiAssistantService（port）
-  Erp.Infrastructure  Persistence（EF Core）與 AI（Anthropic tool-use）兩個平行子系統
+  Erp.Infrastructure  Persistence（EF Core）、AI（Anthropic tool-use）、
+                      Rag（Ollama embedding + 向量檢索）三個平行子系統
   Erp.Api             HTTP 端點
 tests/
   Erp.Application.Tests      Application 層單元測試（以 in-memory 假 Repository 驅動）
@@ -41,10 +45,14 @@ docs/
   ai-assistant-module-plan-v3.md   現行規劃：實作對帳與剩餘工作
   ai-assistant-module-plan-v2.md   設計規範：工具契約、庫存基準、防幻覺機制
   ai-assistant-module-plan-v1.md   最初的規劃（動工前，保持原貌）
+  rag-module-plan-v1.md            文件語意檢索的規劃與七個決策點
 ```
 
 Domain 完全不知道 AI 的存在：`IAiAssistantService` 定義在 Application，實作在 `Infrastructure/AI`，
 與 `Infrastructure/Persistence` 平行，跟既有的 Repository 一樣是依賴反轉。
+
+`Infrastructure/Rag` 是第三個平行子系統，依賴方向是 `AI → Rag → Persistence`。
+Domain 與 Application 都不知道向量或 embedding 的存在，由架構測試保護。
 
 依賴方向固定為 `Api → Infrastructure → Application → Domain`，Domain 不知道上層存在。
 
@@ -89,6 +97,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
 | Phase 3.5 — 規劃對帳後補齊的缺口（錯誤處理、錯誤碼、稽核 log、user-secrets） | 完成 |
 | Phase 4 — 展示準備 | 完成（`docs/demo-and-design-notes.md`）；真實 API 驗證待金鑰 |
+| Phase 5 — 文件語意檢索（RAG，第 9 個工具） | 完成；**尚未對真實 Ollama 驗證過**（開發機沒裝） |
 
 ### 八個 Application 服務（AI 工具背後真正做事的地方）
 
@@ -144,9 +153,9 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
 
-### 八個工具
+### 九個工具
 
-全部都是唯讀查詢，沒有一個會寫入資料庫。每個工具都只是薄薄一層，
+全部都是唯讀查詢，沒有一個會寫入資料庫。前八個都只是薄薄一層，
 把參數轉交給既有的 Application Service，數字一律由後端算好。
 
 | 工具 | 對應服務 |
@@ -159,6 +168,12 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `run_mrp_shortage_analysis` | `MrpCalculationService` |
 | `list_open_purchase_orders` | `PurchasingQueryService` |
 | `get_quality_inspection_summary` | `QualityInspectionQueryService` |
+| `search_documents` | `DocumentSearchService`（`Infrastructure/Rag`，不經 Application） |
+
+`search_documents` 是唯一不轉呼叫 Application Service 的工具：語意檢索是基礎設施能力
+（embedding HTTP 呼叫與向量運算），不是領域使用案例。讓它經過 Application 就得在那裡
+定義一個帶相似度分數的型別，而「Domain／Application 不得知道向量這回事」是架構測試釘住的規則。
+取捨見 [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md) 決策 D5。
 
 新增工具要改三個地方，少改一個測試就會紅：`ToolCatalog.All`、`ToolDispatcher`
 的 switch、以及 `ToolCatalogConsistencyTests.SampleValue`（沒有範例值會直接擲錯）。
@@ -185,6 +200,7 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `ENTITY_NOT_FOUND` | 資料不存在 | 告知查不到，不要重試 |
 | `INVALID_ARGUMENT` | 參數缺漏或格式不對 | 依 message 修正後可重試一次 |
 | `NOT_APPLICABLE` | 參數合法但問法不適用（如對原物料問可製造量） | 說明原因，不要重試 |
+| `SERVICE_UNAVAILABLE` | 依賴的外部服務沒跑（RAG 需要的 Ollama） | 說明原因並建議改用結構化查詢，不要重試 |
 | `UNKNOWN_TOOL` / `INTERNAL_ERROR` | 呼叫了不存在的工具／未預期錯誤 | 不要重試 |
 
 未預期例外一律降級成單一工具的失敗，不會讓整段對話回 500；
@@ -200,6 +216,94 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 ```
 
 未預期例外另外記一筆 `Error`，含例外全文；回給 LLM 的內容則不含任何內部細節。
+
+RAG 的檢索層另外記一筆，因為通用那行記不到它獨有的兩個數字：
+
+```
+文件檢索完成，片段總數 33，命中 2 段，最高相似度 0.5611，門檻 0.5，耗時 65 ms
+```
+
+（這行是實際跑出來貼上的，但用的是測試的假 embedding ——
+真實 Ollama 模型的分數分布不同，見「尚未處理」。）
+
+**最高相似度是過濾之前的**，而且刻意不回給 LLM。助理說「文件裡查不到」之後，
+要判斷是語料真的沒有、還是門檻調太高，只有這個數字能回答。
+
+## 文件語意檢索（RAG）—— 可選模組
+
+**沒裝 Ollama 也能跑。** 核心 ERP 與前八個工具完全不依賴它，只有 `search_documents`
+會回 `SERVICE_UNAVAILABLE` 並說明原因。`dotnet run` 直接跑得起來，不會因為少裝東西而啟動失敗。
+
+要啟用的話需要本機 Ollama：
+
+```bash
+brew install ollama && ollama serve
+```
+
+```bash
+ollama pull nomic-embed-text
+```
+
+然後刪掉 `src/Erp.Api/erp.db` 重新啟動，索引會在 seeding 之後自動建立。
+啟動時會印出索引狀態（跟金鑰來源那行同一個理由 —— 否則只能靠猜）：
+
+```
+文件語意檢索：索引 33 段，模型 nomic-embed-text，相似度門檻 0.5
+```
+
+（上面那行是依格式推出來的，**尚未實跑驗證** —— 開發機沒裝 Ollama。下面這行是實跑貼上的。）
+
+沒裝時印的是：
+
+```
+文件語意檢索：索引 0 段，模型 nomic-embed-text，相似度門檻 0.5（索引未建立：需要本機 Ollama 並執行 ollama pull nomic-embed-text；其他八個工具不受影響）
+```
+
+### 技術選擇
+
+| 項目 | 選擇 | 理由 |
+|---|---|---|
+| Embedding | 本機 Ollama HTTP（`/api/embeddings`） | 零成本、離線可跑、不需要金鑰或雲端帳號 |
+| 向量儲存 | 既有 SQLite 的 `document_chunks`，float32 BLOB | 不必多跑一個服務；768 維一段 3072 bytes |
+| 相似度 | C# 手寫 brute-force cosine | 33 段 × 768 維約兩萬次乘加，比一次 HTTP 往返便宜好幾個數量級 |
+
+沒有引入 Qdrant／pgvector，也沒有引入 SIMD 套件。依賴只增加了一個 —— 零個。
+
+### 語料與切段
+
+展示語料是 7 份文件、33 個片段、3944 字，跟 TV-100 的結構化情境共用同一個故事世界：
+
+| 文件 | 片段數 |
+|---|---|
+| 品管異常處理 SOP — 面板色偏／組裝異音／外觀尺寸超差 | 5 / 5 / 4 |
+| 設備維修手冊摘要 — 面板貼合機／自動鎖螺絲機 | 5 / 4 |
+| 客訴處理紀錄 — 面板色偏批量客訴／訊號線接觸不良 | 5 / 5 |
+
+所以「WO 為什麼延遲」由結構化工具回答，「色偏該怎麼處理」由 `search_documents` 回答，
+兩者在同一次對話裡互補而不重疊。
+
+切段策略是**依段落切、不重疊**：`chunk_index` 與原文段落一對一，引用座標才精確。
+太短的段落（標題行）會併進下一段 —— 否則它會變成一個幾乎沒有資訊的片段，白佔 `top_k` 的位置。
+
+### 防幻覺：這裡的等價要求是「不能引用不存在的段落」
+
+既有的原則是「所有數字都由後端算好，LLM 不能編造」。檢索的等價物是引用來源：
+
+1. **相似度門檻判斷留在後端。** 低於門檻的片段根本不會出現在工具回傳值裡 ——
+   讓 LLM 自己看分數決定「這段算不算相關」，等於把判準交給無法測試的一方。
+2. **引用座標只能來自工具回傳值。** `source_name` 與 `chunk_index` 由後端給，
+   system prompt 明文禁止改寫或推測文件名稱。測試斷言回傳的每一組座標都真的在資料表裡。
+3. **查不到就是查不到。** `chunks` 為空時 system prompt 要求明確說「文件中查不到」，
+   禁止改用模型自己的知識回答 —— 那會讓使用者以為那是公司文件的規定。
+4. **`similarity` 不得當成百分比轉述。** 0.48 不是「48% 相關」。
+5. **「索引沒建」與「查不到」是兩個不同的答案。** 前者回 `SERVICE_UNAVAILABLE`，
+   後者回成功的空結果。混為一談會讓使用者以為文件裡真的沒寫。
+
+### 換模型要重建索引
+
+`document_chunks` 每一列都記著 `embedding_model` 與 `dimension`。查詢時先比對模型名稱，
+不一致就直接回錯誤並要求重建 —— 不同模型的向量空間不同，硬算會得到一個
+**有數字但沒有意義**的相似度，而那種錯誤不會拋例外，只會讓排序靜靜地變成另一個樣子。
 
 ## API 錯誤處理
 
@@ -267,19 +371,34 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 用假 Repository 完全看不出來，接上真資料庫才成為問題。判準用「查詢次數如何隨料號數成長」
 而不是絕對次數 —— 絕對次數會隨 BOM 結構改變，斷言它只會製造脆弱的測試。
 
+**一致性測試會被新工具反咬**（做 RAG 時踩到）：`ToolCatalogConsistencyTests` 會走訪每個工具
+並斷言它不回錯誤，而 CI 上沒有 Ollama —— 第九個工具必然讓那兩條 Theory 變紅。
+這讓 `IEmbeddingClient` 從「將來換供應商」的裝飾性抽象變成**必需品**：
+測試要注入固定向量的假實作才能離線跑。抽象的真正理由常常不是原本宣稱的那個。
+
+**完全相同的向量，cosine 不是精確的 1.0**（測試抓到的）：門檻原本在測試裡設成 `1.0`
+來表達「只有完全相同的那一段會過關」，結果連它自己都被濾掉 ——
+浮點累加出來是 `0.9999999999…`，而過濾用的是 `>=`。改成 `0.999`。
+這類「邊界值剛好等於門檻」的假設在浮點數上永遠要留餘裕。
+
+**假伺服器在用戶端逾時後連設定 `ContentLength64` 都會炸**（測逾時時抓到的）：
+用戶端放棄後 `HttpListenerResponse` 已被釋放，那個賦值擲 `ObjectDisposedException`，
+而它在 `try` 外面 —— 斷言其實通過了，測試卻在 `Dispose` 等待接聽迴圈時失敗。
+症狀看起來像「逾時處理壞了」，實際上是測試替身自己的問題。
+
 **工具參數不是單一 JSON 值**：`BetaToolUseBlockParam.Input` 的型別是屬性字典，
 把 `JsonElement` 直接丟進去編不過，回送 tool_use 時要展開。
 
 ## 測試策略
 
-166 個測試，分四個專案：
+255 個測試，分四個專案：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 100 | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic wire format |
-| `Erp.Api.Tests` | 13 | HTTP 端點的錯誤對映與正常路徑（`WebApplicationFactory`） |
-| `Erp.ArchitectureTests` | 7 | 分層邊界 |
+| `Erp.Infrastructure.Tests` | 183 | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺 |
+| `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
 幾個值得一提的：
 
@@ -290,6 +409,16 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
   逐欄檢查 body。不需要金鑰、不花錢。型別轉換編譯得過不代表 wire format 正確。
 - **`QueryEfficiencyTests`** — 斷言查詢次數如何「隨缺料料號數成長」，而不是絕對次數
   （那會隨 BOM 結構改變，只會製造脆弱的測試）。把 N+1 改回去會紅。
+- **`VectorMathTests`** — cosine 的邊界案例：零向量回 0 不回 `NaN`、維度不一致擲例外
+  而不是靜默比較前 N 維、等比例放大的向量相似度仍是 1（這條是「有沒有真的除以模長」的
+  唯一證據）。反向驗證：拿掉正規化會紅 10 條。
+- **`DocumentSearchServiceTests`** — 防幻覺那幾條。最有價值的一條是
+  「查詢字串與某段落完全相同時該段排第一且引用座標對得上資料表」：它不依賴 embedding
+  的語意品質（同一段文字必然得到同一個向量），驗的是 BLOB round-trip、評分、排序、
+  引用座標整條鏈路。反向驗證：拿掉門檻過濾會紅 5 條。
+- **`OllamaEmbeddingClientTests`** — 用本機假伺服器檢查送出的請求，並逐一驗證
+  連線被拒、404（模型沒 pull）、500、壞 JSON、沒有 `embedding` 欄位、逾時
+  各自轉成什麼訊息。不需要裝 Ollama。
 - **`SystemPromptTests`** — 明確**不驗證 LLM 是否遵守規則**（那需要真實 API 與行為評測），
   防的是有人重寫 prompt 時把某條規則整個刪掉。
 
@@ -308,7 +437,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 - Domain 不得相依於任何其他層，也不得參考 EF Core
 - Application 不得相依於 Infrastructure（依賴反轉的方向）
 - Domain 與 Application 都不得參考任何 LLM 廠商套件
-- Persistence 與 AI 是平行子系統，Persistence 不得相依於 AI
+- Domain 與 Application 都不得相依於 Rag 子系統，也不得參考任何向量或 embedding 套件
+- Persistence、AI、Rag 是平行子系統：Persistence 不得相依於 AI 或 Rag，Rag 不得相依於 AI
+
+「不得參考向量或 embedding 套件」那條是一份**預防性清單**（`System.Numerics.Tensors`、
+`Microsoft.ML`、`Ollama*`、`Qdrant*` 等），目前沒有任何命中 —— RAG 刻意只用 `HttpClient`
+與手寫 cosine。它防的是日後有人在 Application 裝一個向量套件，那時命名空間規則擋不住。
+反向驗證的方式是臨時在 Application 加一個命中清單的 `PackageReference` 並實際用
+`typeof` 引用它，確認測試會紅後還原 —— 實測紅了。
 
 其中「不得參考 LLM 廠商套件」用的是組件參考檢查而不是命名空間規則 ——
 NetArchTest 檢查的是 `Erp.*` 命名空間，對外部套件無感。實測在 Domain 裡寫
@@ -353,6 +489,23 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
   送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
   （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
+- **RAG 的檢索是 brute-force 全表掃描**：每次查詢載入全部向量。33 個片段無感
+  （768 維 × 33 段約兩萬次乘加），數萬份文件要換 ANN 索引 —— 那時要換的是
+  `DocumentSearchService` 一個類別，不是整個架構。
+- **RAG 索引不會自動更新**：語料是編譯進程式的常數（`DemoCorpus`），改了要刪掉資料庫重建，
+  與既有種子資料同一個模式。沒有文件上傳端點 —— 那會帶出權限、病毒掃描、檔案儲存
+  一整串與本模組無關的問題。
+- **RAG 沒有 reranking、沒有 query rewrite**：刻意不做。這些會讓「答案從哪來」變得難追，
+  與「所有數字由後端算好」的方向相反。
+- **相似度門檻是靠語料調出來的經驗值**（預設 0.5，寫在設定裡）。
+  它是唯一需要看實際語料與模型微調的參數；換模型後應重新檢視。
+- **`OllamaEmbeddingClient` 尚未對真實 Ollama 驗證過**（開發機沒裝）。送出的 HTTP 請求
+  已用本機假伺服器逐欄檢查，連線被拒、404、500、壞 JSON、逾時各自的錯誤訊息也都測過，
+  但「真實 Ollama 會接受這個請求、回傳的向量能找出語意相關的段落」尚未驗證。
+  與 Anthropic 那個缺口不同的是，這個只需要裝一個本機服務就能關閉，不需要儲值。
+- **「檢索找得準不準」沒有測試涵蓋**：現有測試用的是假 embedding（字元雜湊袋），
+  它能驗排序、門檻、引用座標、錯誤契約，但驗不了語意品質。
+  那需要真實模型加上一組人工標註的問答對，屬於行為評測而不是單元測試。
 - **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
   注入呼叫者身分並下推到查詢服務。
 

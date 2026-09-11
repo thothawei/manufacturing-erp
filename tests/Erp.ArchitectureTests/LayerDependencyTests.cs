@@ -70,6 +70,76 @@ public class LayerDependencyTests
     }
 
     [Fact]
+    public void Domain與Application都不得相依於Rag子系統()
+    {
+        // 向量與 embedding 是基礎設施細節。Application 一旦知道「有相似度這回事」，
+        // 之後就會有人想把門檻判斷搬上去 —— 那會讓防幻覺的判準離開可測試的位置。
+        // 取捨寫在 docs/rag-module-plan-v1.md 決策 D5。
+        foreach (var assembly in new[] { Domain, Application })
+        {
+            var result = Types.InAssembly(assembly)
+                .Should()
+                .NotHaveDependencyOn("Erp.Infrastructure.Rag")
+                .GetResult();
+
+            AssertSuccess(result, assembly.GetName().Name);
+        }
+    }
+
+    [Fact]
+    public void Domain與Application都不得參考向量或embedding套件()
+    {
+        // 這是一條預防性的清單：目前沒有任何命中，因為 RAG 刻意只用 HttpClient
+        // 與手寫 cosine（決策 D7）。它防的是日後有人在 Application 裝一個向量套件 ——
+        // 那時命名空間規則擋不住，只有組件參考檢查會紅。
+        // 同一個理由見「不得參考 LLM 廠商套件」那條：NetArchTest 對外部套件無感。
+        string[] vendors =
+        [
+            "System.Numerics.Tensors", "Microsoft.ML", "Ollama",
+            "Qdrant", "Pinecone", "Milvus", "Weaviate", "Pgvector", "FaissNet"
+        ];
+
+        foreach (var assembly in new[] { Domain, Application })
+        {
+            var referenced = assembly.GetReferencedAssemblies()
+                .Select(a => a.Name ?? "")
+                .Where(name => vendors.Any(v => name.StartsWith(v, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            Assert.True(referenced.Count == 0,
+                $"{assembly.GetName().Name} 參考了向量或 embedding 套件：{string.Join("、", referenced)}");
+        }
+    }
+
+    [Fact]
+    public void Rag子系統不得相依於AI子系統()
+    {
+        // 三個子系統平行，方向是 AI → Rag → Persistence。
+        // Rag 反過來知道 tool-use 的存在，就不再是一個能獨立替換的檢索模組
+        var result = Types.InAssembly(Infrastructure)
+            .That().ResideInNamespace("Erp.Infrastructure.Rag")
+            .Should()
+            .NotHaveDependencyOn("Erp.Infrastructure.AI")
+            .GetResult();
+
+        AssertSuccess(result);
+    }
+
+    [Fact]
+    public void Persistence不得相依於Rag子系統()
+    {
+        // 索引建立刻意不放進 ErpDbSeeder：那會把兩個平行子系統綁成上下關係。
+        // 由 Api 層呼叫 RagIndexBuilder，Api 本來就依賴兩者
+        var result = Types.InAssembly(Infrastructure)
+            .That().ResideInNamespace("Erp.Infrastructure.Persistence")
+            .Should()
+            .NotHaveDependencyOn("Erp.Infrastructure.Rag")
+            .GetResult();
+
+        AssertSuccess(result);
+    }
+
+    [Fact]
     public void Domain不得參考資料存取套件()
     {
         // EF Core 屬於 Infrastructure 的細節，Domain 實體必須是純 POCO

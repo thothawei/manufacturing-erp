@@ -14,6 +14,7 @@ using Erp.Infrastructure;
 using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Json;
 using Erp.Infrastructure.Persistence;
+using Erp.Infrastructure.Rag;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
@@ -50,7 +51,7 @@ builder.Services.AddOpenApi(options =>
         document.Info.Description =
             "Clean Architecture 分層的製造業 ERP。\n\n"
             + "除了一般的查詢端點，另有一個以 tool-use 驅動的 AI 助理："
-            + "使用者用自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答，"
+            + "使用者用自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答，"
             + "所有數字都由後端算好，LLM 不做任何計算。\n\n"
             + "**兩個容易答錯的地方**：可行性判斷一律以可用庫存（帳上減已保留）為準；"
             + "多階 BOM 的用量以最終成品一個單位為分母，中間階已逐層累乘。";
@@ -73,12 +74,17 @@ if (app.Environment.IsDevelopment())
 }
 
 // 開發環境自動建表並灌入展示資料；正式環境應改為明確的部署步驟
+var ragChunkCount = 0;
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ErpDbContext>();
     await db.Database.MigrateAsync();
     await ErpDbSeeder.SeedAsync(db, scope.ServiceProvider.GetRequiredService<IClock>());
+
+    // 文件檢索索引需要本機 Ollama 產生向量。沒裝時回 0 並只記一條 Warning ——
+    // RAG 是可選模組，它建不起來不該讓整個服務啟動失敗
+    ragChunkCount = await scope.ServiceProvider.GetRequiredService<RagIndexBuilder>().BuildAsync();
 }
 
 // 啟動時把 AI 助理的生效設定印出來（金鑰只印有沒有、不印值）。
@@ -87,6 +93,16 @@ var aiOptions = app.Services.GetRequiredService<IOptions<AiAssistantOptions>>().
 app.Logger.LogInformation(
     "AI 助理設定：模型 {Model}，工具迴圈上限 {MaxIterations} 輪，逾時 {TimeoutSeconds} 秒，API 金鑰來源：{KeySource}",
     aiOptions.Model, aiOptions.MaxToolIterations, aiOptions.TimeoutSeconds, DescribeKeySource(aiOptions));
+
+// 同理：沒有這行的話，「RAG 索引到底有沒有建起來」只能靠猜，
+// 而它建不起來時的症狀是一個工具回錯誤，不是啟動失敗
+var ragOptions = app.Services.GetRequiredService<IOptions<RagOptions>>().Value;
+app.Logger.LogInformation(
+    "文件語意檢索：索引 {ChunkCount} 段，模型 {Model}，相似度門檻 {Threshold}{Hint}",
+    ragChunkCount, ragOptions.EmbeddingModel, ragOptions.SimilarityThreshold,
+    ragChunkCount == 0
+        ? $"（索引未建立：需要本機 Ollama 並執行 ollama pull {ragOptions.EmbeddingModel}；其他八個工具不受影響）"
+        : string.Empty);
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .WithSummary("健康檢查")
@@ -107,7 +123,7 @@ app.MapPost("/api/ai-assistant/ask", async (
     })
     .WithSummary("AI 助理問答")
     .WithDescription(
-        "以自然語言提問，AI 透過八個唯讀工具查詢系統資料後回答。" +
+        "以自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
         "一次請求內部會有多輪 LLM 與工具的往返（上限 5 輪），但不保存跨請求的對話記憶。" +
         "需要設定 Anthropic API 金鑰，未設定時回 503。");
 

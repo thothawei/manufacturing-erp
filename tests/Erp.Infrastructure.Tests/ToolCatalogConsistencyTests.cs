@@ -22,7 +22,12 @@ public class ToolCatalogConsistencyTests : IAsyncLifetime
         var clock = new TestClock(Today);
         await ErpDbSeeder.SeedAsync(_fixture.Db, clock);
 
-        _dispatcher = TestServices.CreateDispatcher(_fixture, clock);
+        // 第九個工具要查索引。CI 上沒有 Ollama，所以用假 embedding 先把索引建起來 ——
+        // 這組測試要驗的是「目錄宣告的參數接得上實作」，不是「Ollama 活著」
+        var embedding = new FakeEmbeddingClient();
+        await TestServices.BuildRagIndexAsync(_fixture, embedding);
+
+        _dispatcher = TestServices.CreateDispatcher(_fixture, clock, embeddingClient: embedding);
     }
 
     public async Task DisposeAsync() => await _fixture.DisposeAsync();
@@ -125,6 +130,8 @@ public class ToolCatalogConsistencyTests : IAsyncLifetime
             (ToolCatalog.CheckMaterialSufficiency, "planned_qty") => 10,
 
             (_, "keyword") => "PANEL",
+            (_, "query") => "面板色偏怎麼判定",
+            (_, "top_k") => 2,
             (_, "item_code") => "PANEL-01",
             (_, "work_order_no") => $"WO-{Stamp}-01",
             (_, "supplier_code") => "SUP-008",

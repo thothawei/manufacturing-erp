@@ -12,6 +12,7 @@ using Erp.Application.Production;
 using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure.Json;
+using Erp.Infrastructure.Rag;
 using Microsoft.Extensions.Logging;
 
 namespace Erp.Infrastructure.AI;
@@ -31,6 +32,7 @@ public sealed class ToolDispatcher(
     MrpCalculationService mrpCalculationService,
     PurchasingQueryService purchasingQueryService,
     QualityInspectionQueryService qualityInspectionQueryService,
+    DocumentSearchService documentSearchService,
     ILogger<ToolDispatcher> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -103,6 +105,15 @@ public sealed class ToolDispatcher(
                     OptionalDate(arguments, "date_range_start"),
                     OptionalDate(arguments, "date_range_end"), ct)),
 
+                // 唯一不是轉呼叫 Application Service 的工具：語意檢索是基礎設施能力
+                // （embedding HTTP 呼叫與向量運算），不是領域使用案例。
+                // 讓它經過 Application 就得在那裡定義一個帶相似度分數的型別，
+                // 而 Domain／Application 不得知道向量這回事是架構測試釘住的規則。
+                // 取捨寫在 docs/rag-module-plan-v1.md 決策 D5。
+                ToolCatalog.SearchDocuments => Ok(await documentSearchService.SearchAsync(
+                    RequireString(arguments, "query"),
+                    OptionalInt(arguments, "top_k"), ct)),
+
                 _ => Error(ToolErrorCode.UnknownTool, $"未知的工具名稱：{toolName}")
             };
         }
@@ -121,6 +132,14 @@ public sealed class ToolDispatcher(
         {
             // 參數本身合法，但這筆資料不適用這個問法（例如對原物料問可製造量）
             return Error(ToolErrorCode.NotApplicable, ex.Message);
+        }
+        catch (EmbeddingUnavailableException ex)
+        {
+            // 外部服務不可用（本機沒裝或沒啟動 Ollama、模型沒 pull、索引沒建）。
+            // 這不是程式故障，訊息本身就寫著該怎麼做，所以原樣轉給 LLM ——
+            // 它會照 system prompt 告訴使用者文件檢索暫時不可用，並建議改用結構化查詢。
+            logger.LogWarning("工具 {ToolName} 依賴的服務不可用：{Reason}", toolName, ex.Message);
+            return Error(ToolErrorCode.ServiceUnavailable, ex.Message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
