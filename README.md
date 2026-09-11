@@ -12,8 +12,10 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
 258 個測試通過、0 警告（另有 3 個檢索品質測試要本機有 Ollama 才跑，裝了就是 261）。
-**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
-發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
+**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 LLM 發過請求（開發機沒有金鑰），
+送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。整條路徑則實跑通過一次 ——
+`/api/ai-assistant/ask` → tool-use 迴圈 → OmniRoute → provider → 工具查到真實的
+seed 資料 → 最終答案，provider 那端是本機 stub，不是真的模型。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
 見「為什麼不是 nomic-embed-text」。
 
