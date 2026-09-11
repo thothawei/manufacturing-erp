@@ -83,7 +83,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 255 個測試（本機有 Ollama 時 264）
+dotnet test                          # 258 個測試（本機有 Ollama 時 261）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```

@@ -11,7 +11,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-255 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 264）。
+258 個測試通過、0 警告（另有 3 個檢索品質測試要本機有 Ollama 才跑，裝了就是 261）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
@@ -449,13 +449,13 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-255 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 264 個：
+258 個測試，分四個專案。另有 3 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 261 個：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 183（+9 需 Ollama） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Infrastructure.Tests` | 186（+3 需 Ollama） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
