@@ -461,6 +461,23 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 | `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
+### 端到端腳本（不在 CI 裡）
+
+```bash
+omniroute                      # 另一個終端機
+./scripts/e2e-omniroute.sh
+```
+
+上面那些測試都停在 `AnthropicLlmClient` 的邊界：單元測試用假的 `ILlmClient`，
+wire format 測試用假的 Anthropic 伺服器。**gateway 那一層的轉譯沒有任何測試看得到** ——
+Anthropic 格式 ←→ OpenAI 格式、九個工具的定義、`tool_use`/`tool_result` 來回，
+而那正是最容易默默壞掉的地方。這支腳本把整條打通一次，逐一驗九個工具、
+平行工具呼叫與錯誤契約，全過回 0。
+
+provider 端是 `scripts/fake-openai-provider.mjs`，照問句裡的 `@@CALL <工具> <參數>@@`
+吐出指定的 tool_call —— 要驗的是路徑與轉譯，不是模型答得好不好，
+所以 provider 必須可重複、不花錢。需要跑起真的 ERP 與 gateway，因此不放進 CI。
+
 幾個值得一提的：
 
 - **`ToolCatalogConsistencyTests`** — 工具的 JSON Schema 是手寫的，`ToolDispatcher` 用字串

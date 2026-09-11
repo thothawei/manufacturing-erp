@@ -16,6 +16,13 @@ dotnet test --no-build --configuration Release
 **整條跑完 25–30 秒**（實測：restore 9 秒、format 16 秒、build 12 秒、test 10 秒，258 個測試）。
 這四步是快的，直接在前景跑完看結果，不要丟到背景再自己輪詢。
 
+端到端驗證（會真的跑起 ERP + OmniRoute + stub provider，不在 CI 裡）：
+
+```bash
+omniroute                      # 另一個終端機
+./scripts/e2e-omniroute.sh     # 九個工具、平行呼叫、錯誤契約，全過回 0
+```
+
 ## 工作方式
 
 - **不要開 PR**。改完直接 commit 並 push 到指定分支，除非使用者明確說要開。
