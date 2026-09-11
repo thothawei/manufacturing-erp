@@ -425,7 +425,7 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 ### 每條防線都做過反向驗證
 
 把防線拔掉、確認測試會紅，再還原。沒有紅過的測試等於沒有測試。
-八條防線的驗證結果列在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
+十二條防線的驗證結果列在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
 
 這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
 深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
