@@ -553,6 +553,18 @@ R3 刻意排在 R4 之前：相似度的邊界行為不需要語料就能測，�
 測試總數因此會隨環境變動 —— 有 Ollama 264、沒有 255 加 3 skip。
 文件寫的是 255（CI 的數字），並註明另外 9 個的條件。
 
-**這組測試沒有解決的事**：它在 CI 上是 skip 的，所以這條防線目前靠本機執行。
-要變成真正的 CI 把關，得在 workflow 裡裝 Ollama 並 pull 1.2 GB 的模型 ——
-那是一個「CI 時間換防線強度」的取捨，還沒做。
+**已經進 CI**：獨立的 `retrieval-quality` job 裝 Ollama、pull `bge-m3`、只跑這一組。
+與主 job 分開是因為它慢（1.2 GB 模型），而且分開之後紅燈原因沒有模糊空間。
+
+做這件事時有一個「做錯也不會報錯」的坑：**假防線**。測試在 Ollama 不可用時會自動 skip，
+所以 CI 的安裝步驟一旦悄悄失敗，整組變成 skip 而 job 照樣綠 —— 看起來有把關，實際上什麼都沒跑。
+防線長在程式裡而不是 CI 的 grep：`RAG_REQUIRE_OLLAMA=1` 時 `OllamaAvailability` 不回 skip 理由，
+環境壞掉會以測試失敗的形式現形（實測：停掉 Ollama 並設這個變數，9 條全紅、0 skip，
+錯誤訊息是「請確認它已啟動並已執行 ollama pull bge-m3」）。
+
+第二個坑是模型快取路徑：Linux 安裝腳本會建立 `ollama` 系統使用者並以 systemd 啟動，
+模型落在 `/usr/share/ollama/.ollama/models`，所以快取 `~/.ollama/models` 會永遠是空的，
+症狀只是每次重新下載 1.2 GB 而沒有任何錯誤。用 `OLLAMA_MODELS` 指定路徑並停掉 systemd 那個行程。
+
+**仍然沒有解決的**：標註問答對只有 8 組，擋得住「模型在中文語料上不可用」這種級別的退化，
+擋不住細微的品質下滑。

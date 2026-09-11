@@ -28,3 +28,66 @@ jobs:
 
       - name: 執行全部測試
         run: dotnet test --no-build --configuration Release --verbosity normal
+
+  # 檢索品質：接真實 Ollama 跑，會下載 1.2 GB 的 embedding 模型。
+  #
+  # 刻意與主 job 分開：主 job 維持快速回饋（它不需要 Ollama，那 9 個測試會 skip），
+  # 而這裡紅燈時原因沒有模糊空間 —— 要嘛模型選得不對、要嘛環境沒裝起來。
+  #
+  # 這個 job 存在的理由是一次真實事故：第一版的 embedding 模型在中文語料上
+  # 無關查詢的分數比相關查詢還高，等於門檻形同不存在，而 255 個單元測試全綠
+  # （它們用假 embedding，驗得了「門檻有沒有被套用」，驗不了「門檻值有沒有意義」）。
+  retrieval-quality:
+    runs-on: ubuntu-latest
+
+    # 模型路徑寫死在一個我們控制的位置。
+    # 不這樣做的話：Linux 的安裝腳本會建立一個 ollama 系統使用者並以 systemd 啟動，
+    # 模型落在 /usr/share/ollama/.ollama/models —— 快取路徑會永遠是空的，
+    # 而症狀只是「每次都重新下載 1.2 GB」，不會有任何錯誤訊息。
+    env:
+      OLLAMA_MODELS: /home/runner/.ollama-models
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # key 帶模型名稱：換模型時自然是一個新的 key，不會拿到舊模型
+      - name: 取回快取的 Ollama 模型
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ollama-models
+          key: ollama-models-bge-m3
+
+      - name: 安裝並啟動 Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+
+          # 安裝腳本可能已經用 systemd 把它跑起來了，但那個行程讀不到上面的
+          # OLLAMA_MODELS（它是另一個使用者）。停掉它，改用我們自己啟動的。
+          sudo systemctl stop ollama || true
+
+          ollama serve > /tmp/ollama.log 2>&1 &
+
+          # 等服務真的起來，而不是盲等固定秒數
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:11434/api/tags > /dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:11434/api/tags || { cat /tmp/ollama.log; exit 1; }
+
+      - name: 取得 embedding 模型
+        run: ollama pull bge-m3
+
+      - name: 執行檢索品質測試
+        # RAG_REQUIRE_OLLAMA 讓測試不准 skip：沒有它的話，上面任何一步悄悄失敗
+        # 都會讓整組變成 skip 而這個 job 照樣綠 —— 那是一條假防線
+        env:
+          RAG_REQUIRE_OLLAMA: '1'
+        run: >
+          dotnet test tests/Erp.Infrastructure.Tests
+          --configuration Release
+          --filter "FullyQualifiedName~RetrievalQuality"
+          --verbosity normal

@@ -450,11 +450,15 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
   「查詢字串與某段落完全相同時該段排第一且引用座標對得上資料表」：它不依賴 embedding
   的語意品質（同一段文字必然得到同一個向量），驗的是 BLOB round-trip、評分、排序、
   引用座標整條鏈路。反向驗證：拿掉門檻過濾會紅 5 條。
-- **`RetrievalQualityTests`** — 唯一接**真實 Ollama** 的一組（沒裝時整組 skip）。
+- **`RetrievalQualityTests`** — 唯一接**真實 Ollama** 的一組（本機沒裝時整組 skip，
+  CI 上會真的跑）。
   它存在的理由是一次真實事故：用假 embedding 的測試全綠，卻放過了一個在中文語料上
   不可用的模型。**最關鍵的一條是「與語料無關的問題必須回空結果」** ——
   門檻值有沒有意義，等價於「無關的問題會不會被擋下來」。
   反向驗證：把模型換回 `nomic-embed-text`，這組紅 5 條。
+  另外有一個 `RAG_REQUIRE_OLLAMA` 開關（CI 會設）讓它**不准 skip** ——
+  沒有這個開關，CI 上的 Ollama 安裝一旦悄悄失敗，整組會變成 skip 而 job 照樣綠，
+  那是一條假防線。實測：停掉 Ollama 並設這個變數，9 條全紅、0 skip。
 - **`OllamaEmbeddingClientTests`** — 用本機假伺服器檢查送出的請求，並逐一驗證
   連線被拒、404（模型沒 pull）、500、壞 JSON、沒有 `embedding` 欄位、逾時
   各自轉成什麼訊息。不需要裝 Ollama。
@@ -468,6 +472,25 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
 深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
+
+## CI
+
+兩個 job：
+
+| job | 做什麼 | 為什麼分開 |
+|---|---|---|
+| `build-and-test` | 格式檢查 → Release 建置（警告視為錯誤）→ 全部測試 | 快速回饋。它不需要 Ollama，那 9 個檢索品質測試在這裡是 skip |
+| `retrieval-quality` | 裝 Ollama、pull `bge-m3`、只跑 `RetrievalQualityTests` | 會下載 1.2 GB 模型，比主 job 慢。分開之後它紅燈的原因沒有模糊空間：要嘛模型選得不對、要嘛環境沒裝起來 |
+
+`retrieval-quality` 有三個容易做錯、做錯了又不會報錯的地方：
+
+1. **模型路徑**：Linux 的安裝腳本會建立一個 `ollama` 系統使用者並以 systemd 啟動，
+   模型落在 `/usr/share/ollama/.ollama/models`。快取路徑寫 `~/.ollama/models` 會永遠是空的，
+   而症狀只是「每次都重新下載 1.2 GB」，沒有任何錯誤訊息。
+   解法是用 `OLLAMA_MODELS` 指定路徑，並停掉 systemd 那個行程（它讀不到這個變數）。
+2. **不准 skip**：`RAG_REQUIRE_OLLAMA=1`。少了它，上面任何一步悄悄失敗都會讓測試變成
+   skip 而 job 綠 —— 假防線比沒有防線更糟。
+3. **等服務起來**而不是盲等固定秒數，失敗時把 `ollama serve` 的 log 印出來。
 
 ## 架構邊界
 
@@ -539,11 +562,9 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **相似度門檻（0.5）是對「`bge-m3` + 這個語料」量出來的值，不是通用常數**。
   換 embedding 模型後必須重新量 —— `nomic-embed-text` 下根本不存在可用的門檻值
   （見「為什麼不是 nomic-embed-text」）。
-- **檢索品質的把關不在 CI 上**：`RetrievalQualityTests` 已經把「相關查詢要命中正確來源」
-  與「無關查詢必須回空結果」變成可執行的斷言（換回 `nomic-embed-text` 會紅 5 條），
-  但它在 CI 上是 skip 的 —— CI 沒有 Ollama，要它跑就得每次 runner 下載 1.2 GB 模型。
-  **所以這條防線目前靠的是本機執行，不是 CI**。
-  標註的問答對也只有 8 組（5 相關 + 3 無關），不是一份正式的評測集。
+- **檢索品質的標註問答對只有 8 組**（5 相關 + 3 無關），不是一份正式的評測集。
+  它足以擋住「換到一個在中文語料上不可用的模型」這種級別的退化（實測會紅 5 條），
+  擋不住細微的品質下滑。CI 已經會跑它（見下方「CI」），但 8 組題目就是 8 組題目。
 - **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
   注入呼叫者身分並下推到查詢服務。
 
