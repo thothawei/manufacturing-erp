@@ -594,9 +594,15 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
   需自行指定 `from`。MRP 則已把所有逾期未結案工單納入。
 - **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
   `AskAsync` 預留了加 `conversation_id` 的空間，尚未實作。
-- **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
-  送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
-  （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
+- **`AnthropicLlmClient` 尚未對真實 LLM 驗證過**。tool-use 迴圈由整組測試涵蓋，
+  送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，整條路徑（端點 → 迴圈 → OmniRoute
+  → provider → 工具查真實資料 → 最終答案）也實跑過一輪九個工具、平行呼叫與錯誤路徑，
+  但 provider 那端是本機 stub，從未打過真的模型（本機沒有金鑰）。
+  第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
+- **走 gateway 時 `tool_result` 的 `is_error` 旗標會被丟掉**：OpenAI 的訊息格式沒有這個欄位，
+  OmniRoute 轉譯時只留下 content。這不影響錯誤處理 —— 系統提示詞是依 content 裡的
+  `error_code` 決定怎麼做，不是依那個旗標，實測 `ENTITY_NOT_FOUND` 與
+  `SERVICE_UNAVAILABLE` 都完整送到模型手上。打官方端點時旗標照常送出。
 - **RAG 的檢索是 brute-force 全表掃描**：每次查詢載入全部向量。33 個片段無感
   （768 維 × 33 段約兩萬次乘加），數萬份文件要換 ANN 索引 —— 那時要換的是
   `DocumentSearchService` 一個類別，不是整個架構。
