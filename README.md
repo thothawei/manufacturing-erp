@@ -11,7 +11,8 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-255 個測試，0 警告。**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
+255 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 264）。
+**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
 見「為什麼不是 nomic-embed-text」。
@@ -423,12 +424,13 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-255 個測試，分四個專案：
+255 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 264 個：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 183 | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺 |
+| `Erp.Infrastructure.Tests` | 183（+9 需 Ollama） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
@@ -448,6 +450,11 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
   「查詢字串與某段落完全相同時該段排第一且引用座標對得上資料表」：它不依賴 embedding
   的語意品質（同一段文字必然得到同一個向量），驗的是 BLOB round-trip、評分、排序、
   引用座標整條鏈路。反向驗證：拿掉門檻過濾會紅 5 條。
+- **`RetrievalQualityTests`** — 唯一接**真實 Ollama** 的一組（沒裝時整組 skip）。
+  它存在的理由是一次真實事故：用假 embedding 的測試全綠，卻放過了一個在中文語料上
+  不可用的模型。**最關鍵的一條是「與語料無關的問題必須回空結果」** ——
+  門檻值有沒有意義，等價於「無關的問題會不會被擋下來」。
+  反向驗證：把模型換回 `nomic-embed-text`，這組紅 5 條。
 - **`OllamaEmbeddingClientTests`** — 用本機假伺服器檢查送出的請求，並逐一驗證
   連線被拒、404（模型沒 pull）、500、壞 JSON、沒有 `embedding` 欄位、逾時
   各自轉成什麼訊息。不需要裝 Ollama。
@@ -532,11 +539,11 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **相似度門檻（0.5）是對「`bge-m3` + 這個語料」量出來的值，不是通用常數**。
   換 embedding 模型後必須重新量 —— `nomic-embed-text` 下根本不存在可用的門檻值
   （見「為什麼不是 nomic-embed-text」）。
-- **「檢索找得準不準」沒有自動化測試涵蓋**：單元測試用的是假 embedding（字元雜湊袋），
-  驗得了排序、門檻、引用座標、錯誤契約，驗不了語意品質。
-  真實模型的品質是手動量的（7 題，top-1 命中 4/7，top-3 含正確來源 7/7），
-  那組數字沒有進 CI —— 要進 CI 就得在 CI 上跑 Ollama，而且需要一組人工標註的問答對。
-  這是本模組最大的一個缺口，而且它正是讓第一版選錯模型的原因。
+- **檢索品質的把關不在 CI 上**：`RetrievalQualityTests` 已經把「相關查詢要命中正確來源」
+  與「無關查詢必須回空結果」變成可執行的斷言（換回 `nomic-embed-text` 會紅 5 條），
+  但它在 CI 上是 skip 的 —— CI 沒有 Ollama，要它跑就得每次 runner 下載 1.2 GB 模型。
+  **所以這條防線目前靠的是本機執行，不是 CI**。
+  標註的問答對也只有 8 組（5 相關 + 3 無關），不是一份正式的評測集。
 - **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
   注入呼叫者身分並下推到查詢服務。
 
