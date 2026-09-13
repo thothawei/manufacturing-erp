@@ -6,6 +6,7 @@ using Erp.Application.Bom;
 using Erp.Application.Common;
 using Erp.Application.Inventory;
 using Erp.Application.Items;
+using Erp.Application.Ml;
 using Erp.Application.Mrp;
 using Erp.Application.Production;
 using Erp.Application.Purchasing;
@@ -60,6 +61,7 @@ builder.Services.AddOpenApi(options =>
     });
 });
 builder.Services.AddAiAssistant(builder.Configuration);
+builder.Services.AddDelayRiskModel();
 
 var app = builder.Build();
 
@@ -143,6 +145,18 @@ app.MapPost("/api/ai-assistant/ask", async (
         "quality 品保），不給則不限。這是工具層級的邊界，不是資料列層級的隔離 —— " +
         "允許的工具查得到全庫資料。不同角色的對話歷史互相隔離。" +
         "需要設定 Anthropic API 金鑰，未設定時回 503。");
+
+app.MapGet("/api/work-orders/{workOrderNo}/delay-risk", async (
+        string workOrderNo, WorkOrderDelayRiskPredictionService service, CancellationToken ct)
+    => Results.Ok(await service.CompareAsync(workOrderNo, ct)))
+    .WithSummary("工單延遲風險：規則式 vs 模型")
+    .WithDescription(
+        "同時給出規則式判斷（逾期／缺料，說得出理由）與機器學習模型的預測機率" +
+        "（抓得到組合關聯，但說不出理由），讓兩者可以對照。" +
+        "模型是離線訓練的 logistic regression，以 ONNX 格式載入；" +
+        "**訓練資料是模擬的，不是真實產線資料**。" +
+        "機率是排序用的參考值，不是「一定會延遲」。" +
+        "模型檔不存在時 predictedDelayProbability 為 null，規則式判斷照常可用。");
 
 // 採購建議的人工確認流程。
 //

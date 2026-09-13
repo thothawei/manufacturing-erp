@@ -1,5 +1,7 @@
 using Erp.Application.Abstractions;
+using Erp.Application.Ml;
 using Erp.Infrastructure.AI;
+using Erp.Infrastructure.Ml;
 using Erp.Infrastructure.Persistence;
 using Erp.Infrastructure.Persistence.Repositories;
 using Erp.Infrastructure.Rag;
@@ -54,6 +56,17 @@ public static class DependencyInjection
         // 所以這裡一併註冊 —— 分開讓呼叫端自己記得註冊，漏了只會在執行時才炸
         services.AddRag(configuration);
 
+        return services;
+    }
+
+    /// 工單延遲風險預測。可選模組：模型檔載不起來時整個服務照常啟動，
+    /// 只有預測功能會回報「沒有模型」—— 與 RAG 同一個模式。
+    ///
+    /// singleton 的理由：InferenceSession 建立成本高而且是執行緒安全的，
+    /// 每個請求重建一次會把推論的延遲從微秒級推到毫秒級。
+    public static IServiceCollection AddDelayRiskModel(this IServiceCollection services)
+    {
+        services.AddSingleton<IDelayRiskModel, OnnxDelayRiskModel>();
         return services;
     }
 

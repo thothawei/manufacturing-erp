@@ -1,0 +1,7 @@
+# 只有「訓練」需要這些。線上推論不需要 Python ——
+# 模型以 ONNX 格式進 repo，由 .NET 的 Microsoft.ML.OnnxRuntime 載入。
+# 也就是說 clone 下來跑 dotnet test 不必裝任何 Python 套件。
+pandas==2.3.3
+scikit-learn==1.6.1
+skl2onnx==1.20.0
+onnxruntime==1.19.2

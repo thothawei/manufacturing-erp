@@ -2,6 +2,7 @@ using Erp.Application.Bom;
 using Erp.Application.Common;
 using Erp.Application.Inventory;
 using Erp.Application.Items;
+using Erp.Application.Ml;
 using Erp.Application.Mrp;
 using Erp.Application.Production;
 using Erp.Application.Purchasing;
@@ -26,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<MrpCalculationService>();
         services.AddScoped<PurchasingQueryService>();
         services.AddScoped<PurchaseSuggestionService>();
+        services.AddScoped<WorkOrderDelayRiskPredictionService>();
         services.AddScoped<QualityInspectionQueryService>();
 
         return services;

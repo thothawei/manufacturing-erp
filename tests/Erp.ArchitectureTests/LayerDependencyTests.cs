@@ -140,6 +140,29 @@ public class LayerDependencyTests
     }
 
     [Fact]
+    public void Domain與Application都不得參考推論套件()
+    {
+        // 模型用什麼跑（ONNX Runtime、ML.NET、遠端服務）是基礎設施細節。
+        // Application 只知道 IDelayRiskModel 這個 port —— 與 ILlmClient、
+        // IEmbeddingClient 同一條規則。破壞它的代價很具體：Application 會開始
+        // 相依一個原生函式庫，而那讓「純計算邏輯可以離線快速測試」這件事消失。
+        // 用組件參考檢查，與 LLM 廠商那條同一個做法：只要 csproj 加了
+        // PackageReference 並實際用到，這裡就會抓到
+        string[] inferenceLibraries = ["Microsoft.ML", "Onnx", "TorchSharp", "TensorFlow"];
+
+        foreach (var assembly in new[] { Domain, Application })
+        {
+            var referenced = assembly.GetReferencedAssemblies()
+                .Select(a => a.Name ?? "")
+                .Where(name => inferenceLibraries.Any(v => name.StartsWith(v, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            Assert.True(referenced.Count == 0,
+                $"{assembly.GetName().Name} 參考了推論套件：{string.Join("、", referenced)}");
+        }
+    }
+
+    [Fact]
     public void Domain不得參考資料存取套件()
     {
         // EF Core 屬於 Infrastructure 的細節，Domain 實體必須是純 POCO

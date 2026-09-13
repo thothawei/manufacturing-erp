@@ -7,3 +7,7 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+# ML 訓練用的 Python 虛擬環境。只有重新訓練模型時才需要它 ——
+# 推論不需要 Python，模型以 ONNX 格式進 repo。
+ml/.venv/

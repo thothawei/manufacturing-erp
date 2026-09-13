@@ -4,7 +4,7 @@ namespace Erp.Infrastructure.AI;
 
 /// 所有工具的定義集中在這裡一份。
 ///
-/// 前十個工具都是唯讀查詢。第十一個 suggest_purchase_order 是唯一會寫入的，
+/// 十二個工具裡十一個是唯讀查詢。suggest_purchase_order 是唯一會寫入的，
 /// 而它寫的是一筆「待人工確認」的建議 —— 沒有任何工具通得到正式採購單
 /// （見 docs/ai-assistant-module-plan-v2.md 第 3 節與 README 的「可寫入工具」）。
 ///
@@ -25,6 +25,8 @@ public static class ToolCatalog
 
     /// 唯一會寫入的工具，而且它寫的是「待人工確認的建議」，不是採購單本身
     public const string SuggestPurchaseOrder = "suggest_purchase_order";
+
+    public const string PredictWorkOrderDelayRisk = "predict_work_order_delay_risk";
 
     public static readonly IReadOnlyList<ToolDefinition> All =
     [
@@ -212,6 +214,32 @@ public static class ToolCatalog
                 ["date_range_end"] = Schema(new { type = "string", description = "結束日期，格式 YYYY-MM-DD" })
             },
             []),
+
+        new ToolDefinition(
+            PredictWorkOrderDelayRisk,
+            """
+            單張工單的延遲風險：**同時**給出規則式判斷與機器學習模型的預測機率，讓兩者可以對照。
+            必須提供精確工單號，而且只適用於尚未結案的工單。
+
+            回傳 rule_based_delay_days 與 rule_based_reason（規則式判斷，
+            沒被列為風險時為 null）、predicted_delay_probability（模型預測的延遲機率 0~1，
+            模型不可用時為 null）、exceeds_threshold（是否超過訓練時挑出的決策閾值）、
+            features（模型看到的七個特徵值）、model_description（模型來歷與評估數據）、
+            note（兩種判斷的差異說明，請照實轉述）。
+
+            轉述時必須說清楚三件事：
+            一、機率不是「一定會延遲」，它是排序用的參考值。
+            二、模型說不出理由；要講「為什麼有風險」請用 rule_based_reason。
+            三、模型是用**模擬資料**訓練的，不是真實產線資料。
+            不要把機率講成百分之幾的「準確率」或「信心度」，那是不同的東西。
+
+            只想知道「哪些工單有風險」請用 list_work_orders_at_risk，那個查得比較快也看得到理由。
+            """,
+            new Dictionary<string, JsonElement>
+            {
+                ["work_order_no"] = Schema(new { type = "string", description = "精確工單號，例如 WO-20260910-01" })
+            },
+            ["work_order_no"]),
 
         new ToolDefinition(
             SuggestPurchaseOrder,

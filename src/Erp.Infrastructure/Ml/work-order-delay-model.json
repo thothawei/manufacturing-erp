@@ -1,0 +1,137 @@
+{
+  "trained_on": "2026-09-13",
+  "data_source": "模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
+  "rows_total": 1200,
+  "rows_train": 900,
+  "rows_test": 300,
+  "positive_rate": 0.465,
+  "features": [
+    "material_readiness",
+    "days_until_due",
+    "max_lead_time_days",
+    "progress_ratio",
+    "item_overdue_rate",
+    "weekly_load_ratio",
+    "bom_component_count"
+  ],
+  "cleaning": {
+    "material_readiness_missing_filled": 107,
+    "material_readiness_fill_value": 0.5854,
+    "weekly_load_ratio_missing_filled": 65,
+    "weekly_load_ratio_fill_value": 1.0387,
+    "weekly_load_ratio_clipped": 19,
+    "weekly_load_ratio_upper_bound": 2.0896
+  },
+  "metrics": {
+    "roc_auc": 0.7386,
+    "average_precision": 0.6997,
+    "threshold": 0.26,
+    "precision_at_threshold": 0.5605,
+    "recall_at_threshold": 0.8993,
+    "f1_at_threshold": 0.6906,
+    "precision_at_0.5": 0.6829,
+    "recall_at_0.5": 0.6043,
+    "confusion_matrix_at_threshold": {
+      "true_negative": 63,
+      "false_positive": 98,
+      "false_negative": 14,
+      "true_positive": 125
+    }
+  },
+  "coefficients": {
+    "material_readiness": -0.6017,
+    "days_until_due": -0.859,
+    "max_lead_time_days": 0.2192,
+    "progress_ratio": -0.3358,
+    "item_overdue_rate": 0.0844,
+    "weekly_load_ratio": 0.0697,
+    "bom_component_count": 0.014
+  },
+  "intercept": -0.1817,
+  "golden_samples": [
+    {
+      "features": [
+        0.9116,
+        18.0,
+        6.0,
+        0.3434,
+        0.12,
+        0.9637,
+        4.0
+      ],
+      "expected_probability": 0.14601759
+    },
+    {
+      "features": [
+        0.8793,
+        24.0,
+        7.0,
+        0.2561,
+        0.42,
+        1.4207,
+        6.0
+      ],
+      "expected_probability": 0.142373068
+    },
+    {
+      "features": [
+        1.0,
+        4.0,
+        0.0,
+        0.3279,
+        0.25,
+        0.5931,
+        8.0
+      ],
+      "expected_probability": 0.312030493
+    },
+    {
+      "features": [
+        0.9743,
+        -1.0,
+        6.0,
+        0.796,
+        0.31,
+        1.0387,
+        2.0
+      ],
+      "expected_probability": 0.402610296
+    },
+    {
+      "features": [
+        0.3446,
+        -4.0,
+        3.0,
+        0.0678,
+        0.12,
+        1.5946,
+        7.0
+      ],
+      "expected_probability": 0.860830679
+    },
+    {
+      "features": [
+        0.9343,
+        15.0,
+        13.0,
+        0.549,
+        0.42,
+        0.7965,
+        2.0
+      ],
+      "expected_probability": 0.228315753
+    },
+    {
+      "features": [
+        0.437,
+        13.0,
+        12.0,
+        0.763,
+        0.25,
+        0.9653,
+        6.0
+      ],
+      "expected_probability": 0.398185172
+    }
+  ]
+}

@@ -3,16 +3,16 @@
 [![CI](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml)
 
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
-使用者用自然語言提問，AI 透過十一個工具查詢系統資料後回答，所有數字都由後端算好。
+使用者用自然語言提問，AI 透過十二個工具查詢系統資料後回答，所有數字都由後端算好。
 其中十個是唯讀查詢，唯一會寫入的那個寫出來的是「待人工確認的採購建議」，不是採購單。
 最後一個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
 
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十四個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-358 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 388；
+387 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 417；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -26,6 +26,7 @@ RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那�
 | 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
+| 工單延遲風險預測（ML）的每個決策與取捨 | [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md) |
 | 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
 | RAG 模組的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md) |
 | 最初的規劃長什麼樣 | [`docs/ai-assistant-module-plan-v1.md`](docs/ai-assistant-module-plan-v1.md)（動工前原貌） |
@@ -89,7 +90,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十四個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -242,6 +243,7 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `list_open_purchase_orders` | | ✓ | |
 | `get_quality_inspection_summary` | ✓ | | ✓ |
 | `suggest_purchase_order`（寫入建議） | ✓ | ✓ | |
+| `predict_work_order_delay_risk` | ✓ | ✓ | |
 
 不給 `role` 就是全部工具都開（維持加這一層之前的行為）。
 不認得的角色名稱回 400 —— 打錯字的 `purchase` 靜默變成「全部工具都開」，
@@ -307,9 +309,9 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 通過時會把逐輪對話寫成 `docs/verification/` 底下的純文字紀錄（金鑰已遮蔽），
 讓這次驗證可以被歸檔，而不是跑完就散在 console 裡。
 
-### 十一個工具
+### 十二個工具
 
-十個唯讀查詢加一個寫入。寫入的那個（`suggest_purchase_order`）寫出來的是
+十一個唯讀查詢加一個寫入。寫入的那個（`suggest_purchase_order`）寫出來的是
 **待人工確認的建議**，不是採購單 —— 見「可寫入工具與人工確認」。
 除了 `search_documents` 之外都只是薄薄一層，把參數轉交給既有的 Application Service，
 數字一律由後端算好。
@@ -327,6 +329,7 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 | `get_quality_inspection_summary` | `QualityInspectionQueryService` |
 | `search_documents` | `DocumentSearchService`（`Infrastructure/Rag`，不經 Application） |
 | `suggest_purchase_order` | `PurchaseSuggestionService`（**唯一會寫入**，只寫得出待人工確認的建議） |
+| `predict_work_order_delay_risk` | `WorkOrderDelayRiskPredictionService`（規則式與 ML 模型並陳） |
 
 `search_documents` 是唯一不轉呼叫 Application Service 的工具：語意檢索是基礎設施能力
 （embedding HTTP 呼叫與向量運算），不是領域使用案例。讓它經過 Application 就得在那裡
@@ -517,6 +520,81 @@ ollama pull bge-m3
 不一致就直接回錯誤並要求重建 —— 不同模型的向量空間不同，硬算會得到一個
 **有數字但沒有意義**的相似度，而那種錯誤不會拋例外，只會讓排序靜靜地變成另一個樣子。
 
+## 工單延遲風險預測（ML）—— 可選模組
+
+規則式的 `WorkOrderRiskService` 回答「這張工單**為什麼**有風險」，
+模型回答「它**多可能**延遲」。兩者並存，由
+`predict_work_order_delay_risk` 這個工具同時回傳：
+
+```bash
+curl "http://localhost:5199/api/work-orders/WO-20260913-01/delay-risk"
+```
+
+```json
+{"ruleBasedDelayDays":2,"ruleBasedReason":"缺料：PANEL-01 短少 120 件",
+ "predictedDelayProbability":0.6856,"exceedsThreshold":true,
+ "features":{"materialReadiness":0.4,"daysUntilDue":3,"maxLeadTimeDays":5,
+   "progressRatio":0,"itemOverdueRate":0,"weeklyLoadRatio":0.125,"bomComponentCount":3}}
+```
+
+**訓練資料是模擬的，不是真實產線資料。** 生成規則是我自己寫的，
+所以模型學得回那條規則幾乎是必然 —— 它證明的是 pipeline 接起來了、
+每個決策講得清楚，不是這個模型對真實產線有效。完整的決策紀錄在
+[`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)，
+下面只摘三件最值得講的。
+
+### 一個因為「線上算不出來」而被換掉的特徵
+
+第一版用了「該品項的歷史延遲率」，預測力更好、離線評估也更漂亮。
+寫到線上推論才發現：**系統沒有記錄工單的實際完工日**，
+「當初有沒有準時完工」這件事在資料裡根本不存在。
+
+**特徵工程的第一個判準是「預測當下拿不拿得到」，不是「有沒有預測力」。**
+一個離線算得出來、線上算不出來的特徵，離線評估會很漂亮，上線就是空的。
+換成語意相近、現在就查得到的「該品項未結案工單中已逾交期的比例」。
+
+### 閾值 0.26 是選出來的，不是預設的 0.5
+
+| | precision | recall |
+|---|---|---|
+| 閾值 0.5（預設） | 0.6829 | 0.6043 |
+| 閾值 0.26（採用） | 0.5605 | **0.8993** |
+
+漏抓一張會延遲的工單，代價是客戶端的交期跳票；誤報的代價只是生管多看一眼。
+兩者不對稱，閾值就不該用對稱的預設值。代價也講清楚：這個閾值下每抓到 125 張
+真的會延遲的工單，會誤報 98 張 —— 接不接受是業務判斷，模型該做的是把取捨攤開，
+不是替人選好。
+
+ROC AUC 是 0.7386 而不是 0.99：生成規則裡有 5% 標籤翻轉，延遲與否又是伯努利抽樣，
+本來就不是可以完全預測的。一個假到 0.99 的數字反而該懷疑。
+
+### training/serving skew 的三道防線
+
+同一個特徵在訓練與線上算得不一樣，是這類系統最典型也最難查的失敗：
+不報錯、離線看不出來、線上算出來的機率卻是拿錯尺量的。
+
+1. **特徵定義只有一份**（`WorkOrderDelayFeatures`），而且在 C# 這一側 ——
+   訓練資料由它產生，線上推論也由它組出來。這是「資料生成寫在 C# 而不是
+   訓練腳本裡」的理由：Python 只負責它真正擅長的事（訓練與評估）。
+2. **黃金樣本**：訓練時把七組輸入與 sklearn 算出的機率存進 metadata，
+   測試驗 ONNX 載進 .NET 後算出同一個數字。反向驗證：把 `ToVector` 前兩欄對調，
+   **只有這一條會紅**；機率取到第 0 欄（不延遲），紅 2 條。
+3. **端到端實跑**——而這一道真的抓到了一個 bug：`bom_component_count` 原本寫成
+   「有缺料時用缺料件數、沒缺料時用葉節點數」，單元測試全綠、離線評估正常，
+   打一次 API 才看出線上算出來是 1 而訓練資料裡是 2~8。同一個特徵兩種意思。
+
+### 重新訓練
+
+```bash
+dotnet run --project tools/Erp.MlDataGen          # 產生模擬歷史資料
+python3 -m venv ml/.venv && ml/.venv/bin/pip install -r ml/requirements.txt
+ml/.venv/bin/python ml/train.py                    # 訓練、評估、匯出 ONNX
+```
+
+**推論不需要 Python。** 模型以 ONNX 進 repo，由 `Microsoft.ML.OnnxRuntime` 載入 ——
+clone 下來跑 `dotnet test` 不必裝任何 Python 套件。模型檔載不起來時整個服務照常啟動，
+預測會如實說「沒有模型」，而不是回一個看起來像機率的預設值。
+
 ## API 錯誤處理
 
 `ErpExceptionHandler` 把 Application 層的例外對映成語意正確的狀態碼。
@@ -614,15 +692,15 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-358 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 388 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+387 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 417 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 75 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 244（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Application.Tests` | 93 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 254（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 28 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
-| `Erp.ArchitectureTests` | 11 | 分層邊界 |
+| `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 幾個值得一提的：
 

@@ -7,6 +7,7 @@ using Erp.Application.Bom;
 using Erp.Application.Common;
 using Erp.Application.Inventory;
 using Erp.Application.Items;
+using Erp.Application.Ml;
 using Erp.Application.Mrp;
 using Erp.Application.Production;
 using Erp.Application.Purchasing;
@@ -32,6 +33,7 @@ public sealed class ToolDispatcher(
     MrpCalculationService mrpCalculationService,
     PurchasingQueryService purchasingQueryService,
     PurchaseSuggestionService purchaseSuggestionService,
+    WorkOrderDelayRiskPredictionService delayRiskPredictionService,
     QualityInspectionQueryService qualityInspectionQueryService,
     DocumentSearchService documentSearchService,
     ILogger<ToolDispatcher> logger)
@@ -122,6 +124,9 @@ public sealed class ToolDispatcher(
                     OptionalString(arguments, "work_order_no"),
                     OptionalDate(arguments, "date_range_start"),
                     OptionalDate(arguments, "date_range_end"), ct)),
+
+                ToolCatalog.PredictWorkOrderDelayRisk => Ok(await delayRiskPredictionService.CompareAsync(
+                    RequireString(arguments, "work_order_no"), ct)),
 
                 // 唯一會寫入的工具。它寫的是「待人工確認」的建議，不是採購單 ——
                 // 把 AI 能做的事（產生建議）與需要人把關的事（成立對外的金錢承諾）

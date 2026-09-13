@@ -2,11 +2,13 @@ using Erp.Application.Bom;
 using Erp.Application.Common;
 using Erp.Application.Inventory;
 using Erp.Application.Items;
+using Erp.Application.Ml;
 using Erp.Application.Mrp;
 using Erp.Application.Production;
 using Erp.Application.Purchasing;
 using Erp.Application.Quality;
 using Erp.Infrastructure.AI;
+using Erp.Infrastructure.Ml;
 using Erp.Infrastructure.Persistence.Repositories;
 using Erp.Infrastructure.Rag;
 using Microsoft.Extensions.Logging;
@@ -24,7 +26,8 @@ internal static class TestServices
         IClock clock,
         ILogger<ToolDispatcher>? logger = null,
         IEmbeddingClient? embeddingClient = null,
-        RagOptions? ragOptions = null)
+        RagOptions? ragOptions = null,
+        IDelayRiskModel? delayRiskModel = null)
     {
         var db = fixture.CreateContext();
 
@@ -35,6 +38,9 @@ internal static class TestServices
 
         var bomExplosionService = new BomExplosionService(itemRepository, new BomRepository(db), inventoryRepository);
 
+        var workOrderRiskService = new WorkOrderRiskService(
+            workOrderRepository, itemRepository, bomExplosionService, clock);
+
         var mrpCalculationService = new MrpCalculationService(
             workOrderRepository, itemRepository, inventoryRepository,
             purchaseOrderRepository, bomExplosionService, clock);
@@ -44,7 +50,7 @@ internal static class TestServices
             new InventoryQueryService(itemRepository, inventoryRepository, clock),
             bomExplosionService,
             new WorkOrderProgressService(workOrderRepository),
-            new WorkOrderRiskService(workOrderRepository, itemRepository, bomExplosionService, clock),
+            workOrderRiskService,
             mrpCalculationService,
             new PurchasingQueryService(purchaseOrderRepository),
             new PurchaseSuggestionService(
@@ -53,6 +59,9 @@ internal static class TestServices
                 purchaseOrderRepository,
                 itemRepository,
                 clock),
+            new WorkOrderDelayRiskPredictionService(
+                workOrderRepository, itemRepository, bomExplosionService, workOrderRiskService,
+                delayRiskModel ?? CreateDelayRiskModel(), clock),
             new QualityInspectionQueryService(new QualityInspectionRepository(db)),
             CreateSearchService(fixture, embeddingClient ?? new FakeEmbeddingClient(), ragOptions),
             logger ?? NullLogger<ToolDispatcher>.Instance);
@@ -62,6 +71,13 @@ internal static class TestServices
     /// 每次呼叫都建新的話，就永遠測不到「上一輪記住了什麼」。
     public static IConversationStore CreateConversationStore(int maxTurns = 6)
         => new InMemoryConversationStore(maxTurns, maxConversations: 200, idleTimeout: TimeSpan.FromMinutes(60));
+
+    /// 真的載入 repo 裡那個 ONNX 模型。
+    ///
+    /// 刻意不用假模型：這裡要驗的就是「模型檔真的載得起來、推論真的跑得動」——
+    /// 用假的推論器會讓 ONNX 那一整段完全沒被測到。
+    public static IDelayRiskModel CreateDelayRiskModel()
+        => new OnnxDelayRiskModel(NullLogger<OnnxDelayRiskModel>.Instance);
 
     public static DocumentSearchService CreateSearchService(
         SqliteTestDatabase fixture,

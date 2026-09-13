@@ -12,8 +12,16 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
+  </ItemGroup>
+
+  <!-- 模型檔與它的評估數據跟著組建輸出走。
+       兩個都進 repo：clone 下來跑測試不需要 Python，也不需要重訓一次。 -->
+  <ItemGroup>
+    <None Update="Ml\work-order-delay-model.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Ml\work-order-delay-model.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>
