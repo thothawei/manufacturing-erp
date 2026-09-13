@@ -3,15 +3,16 @@
 [![CI](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml)
 
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
-使用者用自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
+使用者用自然語言提問，AI 透過十一個工具查詢系統資料後回答，所有數字都由後端算好。
+其中十個是唯讀查詢，唯一會寫入的那個寫出來的是「待人工確認的採購建議」，不是採購單。
 最後一個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
 
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十四個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-317 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 347；
+358 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 388；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -88,7 +89,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十四個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -159,6 +160,48 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
 
+### 可寫入工具與人工確認
+
+`suggest_purchase_order` 是唯一會寫入資料的工具，而它寫出來的是一筆
+**狀態為「待人工確認」的採購建議**，不是採購單：
+
+```bash
+# AI 端：產生建議（狀態 PendingApproval，沒有任何採購單成立）
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"缺料的部分幫我開採購建議"}'
+
+# 人工端：看清單、核准或駁回。核准才會產生正式採購單
+curl "http://localhost:5199/api/purchase-suggestions?status=PendingApproval"
+curl -X POST http://localhost:5199/api/purchase-suggestions/PS-20260913-001/approve \
+  -H 'Content-Type: application/json' -d '{"decidedBy":"王採購"}'
+```
+
+**為什麼即使 LLM 已經只能呼叫工具，寫入還要多一層人工確認**：理由不是籠統的
+「怕 LLM 出錯」。採購會產生對外的金錢承諾，而 LLM 的輸入 —— 使用者的一句話、
+檢索到的文件內容 —— 都是它控制不了的。把「產生建議」與「成立承諾」分開之後，
+最壞的結果就只是多一筆要被駁回的建議。這是目前 agentic 系統設計的業界共識模式。
+
+分界線落在程式碼的哪裡：
+
+- `SuggestFromShortagesAsync` 是 AI 工具唯一通得到的入口，它只寫得出 `PendingApproval`。
+- `ApproveAsync` 是整個系統唯一會新增採購單的地方，只有那三個 HTTP 端點呼叫得到，
+  **工具目錄裡沒有任何東西通得到它**（有一條測試釘住 `approve_purchase_suggestion`
+  這類名稱不會出現在目錄裡）。
+
+三個實作上的決定：
+
+- **重複的建議會被跳過。** LLM 重複呼叫同一個工具很常見（它看不到上一次呼叫的副作用），
+  同一個料號還有待確認的建議時就不再產生，回傳的 `skipped_item_codes` 會說明。
+  已被駁回的不算 —— 駁回代表「這次不買」，不是「以後都不要再提」。
+- **已處理過的建議不能重複核准**（回 409）。重複核准會變成兩張採購單。
+- **採購單的預計到貨日是「今天 + 採購前置期」，不是建議裡的需求日。**
+  需求日是「什麼時候要用到」，兩者混用會讓下一輪 MRP 把一張根本來不及的採購單
+  算成及時供給。
+
+建議理由（`reason`）由後端從 MRP 結果組出來，不是 LLM 寫的 —— 它是人核准時的依據，
+必須對得上後端算的數字。system prompt 也規定用完這個工具後必須說清楚
+「這是建議、還沒下單、要有人核准才會成立」，說成「已經幫你下單」是錯的。
+
 ### Prompt injection 對抗
 
 `PromptInjectionResilienceTests` 是一組刻意設計的安全測試，注入字串從兩條路進來：
@@ -198,6 +241,7 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 | `run_mrp_shortage_analysis`／`run_mrp_time_phased_analysis` | ✓ | ✓ | |
 | `list_open_purchase_orders` | | ✓ | |
 | `get_quality_inspection_summary` | ✓ | | ✓ |
+| `suggest_purchase_order`（寫入建議） | ✓ | ✓ | |
 
 不給 `role` 就是全部工具都開（維持加這一層之前的行為）。
 不認得的角色名稱回 400 —— 打錯字的 `purchase` 靜默變成「全部工具都開」，
@@ -263,10 +307,12 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 通過時會把逐輪對話寫成 `docs/verification/` 底下的純文字紀錄（金鑰已遮蔽），
 讓這次驗證可以被歸檔，而不是跑完就散在 console 裡。
 
-### 十個工具
+### 十一個工具
 
-全部都是唯讀查詢，沒有一個會寫入資料庫。前九個都只是薄薄一層，
-把參數轉交給既有的 Application Service，數字一律由後端算好。
+十個唯讀查詢加一個寫入。寫入的那個（`suggest_purchase_order`）寫出來的是
+**待人工確認的建議**，不是採購單 —— 見「可寫入工具與人工確認」。
+除了 `search_documents` 之外都只是薄薄一層，把參數轉交給既有的 Application Service，
+數字一律由後端算好。
 
 | 工具 | 對應服務 |
 |---|---|
@@ -280,6 +326,7 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 | `list_open_purchase_orders` | `PurchasingQueryService` |
 | `get_quality_inspection_summary` | `QualityInspectionQueryService` |
 | `search_documents` | `DocumentSearchService`（`Infrastructure/Rag`，不經 Application） |
+| `suggest_purchase_order` | `PurchaseSuggestionService`（**唯一會寫入**，只寫得出待人工確認的建議） |
 
 `search_documents` 是唯一不轉呼叫 Application Service 的工具：語意檢索是基礎設施能力
 （embedding HTTP 呼叫與向量運算），不是領域使用案例。讓它經過 Application 就得在那裡
@@ -567,14 +614,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-317 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 347 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+358 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 388 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 62 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 220（+30 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
-| `Erp.Api.Tests` | 24 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Application.Tests` | 75 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 244（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Api.Tests` | 28 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
 幾個值得一提的：

@@ -35,16 +35,24 @@ internal static class TestServices
 
         var bomExplosionService = new BomExplosionService(itemRepository, new BomRepository(db), inventoryRepository);
 
+        var mrpCalculationService = new MrpCalculationService(
+            workOrderRepository, itemRepository, inventoryRepository,
+            purchaseOrderRepository, bomExplosionService, clock);
+
         return new ToolDispatcher(
             new ItemMasterQueryService(itemRepository),
             new InventoryQueryService(itemRepository, inventoryRepository, clock),
             bomExplosionService,
             new WorkOrderProgressService(workOrderRepository),
             new WorkOrderRiskService(workOrderRepository, itemRepository, bomExplosionService, clock),
-            new MrpCalculationService(
-                workOrderRepository, itemRepository, inventoryRepository,
-                purchaseOrderRepository, bomExplosionService, clock),
+            mrpCalculationService,
             new PurchasingQueryService(purchaseOrderRepository),
+            new PurchaseSuggestionService(
+                mrpCalculationService,
+                new PurchaseSuggestionRepository(db),
+                purchaseOrderRepository,
+                itemRepository,
+                clock),
             new QualityInspectionQueryService(new QualityInspectionRepository(db)),
             CreateSearchService(fixture, embeddingClient ?? new FakeEmbeddingClient(), ragOptions),
             logger ?? NullLogger<ToolDispatcher>.Instance);

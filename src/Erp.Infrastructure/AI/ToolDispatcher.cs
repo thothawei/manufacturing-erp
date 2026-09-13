@@ -31,6 +31,7 @@ public sealed class ToolDispatcher(
     WorkOrderRiskService workOrderRiskService,
     MrpCalculationService mrpCalculationService,
     PurchasingQueryService purchasingQueryService,
+    PurchaseSuggestionService purchaseSuggestionService,
     QualityInspectionQueryService qualityInspectionQueryService,
     DocumentSearchService documentSearchService,
     ILogger<ToolDispatcher> logger)
@@ -121,6 +122,12 @@ public sealed class ToolDispatcher(
                     OptionalString(arguments, "work_order_no"),
                     OptionalDate(arguments, "date_range_start"),
                     OptionalDate(arguments, "date_range_end"), ct)),
+
+                // 唯一會寫入的工具。它寫的是「待人工確認」的建議，不是採購單 ——
+                // 把 AI 能做的事（產生建議）與需要人把關的事（成立對外的金錢承諾）
+                // 分開，理由寫在 Domain 的 PurchaseSuggestion 上。
+                ToolCatalog.SuggestPurchaseOrder => Ok(await purchaseSuggestionService.SuggestFromShortagesAsync(
+                    OptionalString(arguments, "item_code"), ct)),
 
                 // 唯一不是轉呼叫 Application Service 的工具：語意檢索是基礎設施能力
                 // （embedding HTTP 呼叫與向量運算），不是領域使用案例。

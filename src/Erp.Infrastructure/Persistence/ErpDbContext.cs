@@ -26,6 +26,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
     public DbSet<RoutingStep> RoutingSteps => Set<RoutingStep>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<PurchaseSuggestion> PurchaseSuggestions => Set<PurchaseSuggestion>();
     public DbSet<QualityInspection> QualityInspections => Set<QualityInspection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -90,6 +90,56 @@ public sealed class InMemoryPurchaseOrderRepository(IEnumerable<PurchaseOrder> p
             .Where(p => p.IsOpen)
             .Where(p => supplierCode is null || string.Equals(p.SupplierCode, supplierCode, StringComparison.OrdinalIgnoreCase))
             .Where(p => itemCode is null || string.Equals(p.ItemCode, itemCode, StringComparison.OrdinalIgnoreCase))]);
+
+    /// 已建立的採購單。核准流程的測試要確認「真的多了一張單」，
+    /// 而不是只確認建議的狀態變了
+    public IReadOnlyList<PurchaseOrder> All => _purchaseOrders;
+
+    public Task AddAsync(PurchaseOrder purchaseOrder, CancellationToken ct = default)
+    {
+        _purchaseOrders.Add(purchaseOrder);
+        return Task.CompletedTask;
+    }
+
+    public Task<int> CountByPoNoPrefixAsync(string prefix, CancellationToken ct = default)
+        => Task.FromResult(_purchaseOrders.Count(p => p.PoNo.StartsWith(prefix, StringComparison.Ordinal)));
+
+    public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+}
+
+public sealed class InMemoryPurchaseSuggestionRepository(IEnumerable<PurchaseSuggestion>? seed = null)
+    : IPurchaseSuggestionRepository
+{
+    private readonly List<PurchaseSuggestion> _suggestions = [.. seed ?? []];
+
+    public IReadOnlyList<PurchaseSuggestion> All => _suggestions;
+
+    public Task<PurchaseSuggestion?> GetByNoAsync(string suggestionNo, CancellationToken ct = default)
+        => Task.FromResult(_suggestions.FirstOrDefault(s =>
+            string.Equals(s.SuggestionNo, suggestionNo, StringComparison.OrdinalIgnoreCase)));
+
+    public Task<IReadOnlyList<PurchaseSuggestion>> ListAsync(
+        PurchaseSuggestionStatus? status = null, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<PurchaseSuggestion>>(
+            [.. _suggestions.Where(s => status is null || s.Status == status)]);
+
+    public Task<IReadOnlyList<string>> GetPendingItemCodesAsync(
+        IReadOnlyList<string> itemCodes, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<string>>([.. _suggestions
+            .Where(s => s.IsPending && itemCodes.Contains(s.ItemCode, StringComparer.OrdinalIgnoreCase))
+            .Select(s => s.ItemCode)
+            .Distinct(StringComparer.OrdinalIgnoreCase)]);
+
+    public Task AddRangeAsync(IReadOnlyList<PurchaseSuggestion> suggestions, CancellationToken ct = default)
+    {
+        _suggestions.AddRange(suggestions);
+        return Task.CompletedTask;
+    }
+
+    public Task<int> CountBySuggestionNoPrefixAsync(string prefix, CancellationToken ct = default)
+        => Task.FromResult(_suggestions.Count(s => s.SuggestionNo.StartsWith(prefix, StringComparison.Ordinal)));
+
+    public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
 }
 
 public sealed class InMemoryQualityInspectionRepository(IEnumerable<QualityInspection> inspections)

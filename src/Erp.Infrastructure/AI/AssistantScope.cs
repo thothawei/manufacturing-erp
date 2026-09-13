@@ -40,6 +40,7 @@ public static class AssistantScope
                 ToolCatalog.RunMrpShortageAnalysis,
                 ToolCatalog.RunMrpTimePhasedAnalysis,
                 ToolCatalog.GetQualityInspectionSummary,
+                ToolCatalog.SuggestPurchaseOrder,
                 ToolCatalog.SearchDocuments
             },
 
@@ -52,6 +53,7 @@ public static class AssistantScope
                 ToolCatalog.RunMrpShortageAnalysis,
                 ToolCatalog.RunMrpTimePhasedAnalysis,
                 ToolCatalog.ListOpenPurchaseOrders,
+                ToolCatalog.SuggestPurchaseOrder,
                 ToolCatalog.SearchDocuments
             },
 

@@ -27,4 +27,12 @@ public sealed class PurchaseOrderRepository(ErpDbContext db) : IPurchaseOrderRep
 
         return await query.OrderBy(p => p.ExpectedArrivalDate).ThenBy(p => p.PoNo).ToListAsync(ct);
     }
+
+    public async Task AddAsync(PurchaseOrder purchaseOrder, CancellationToken ct = default)
+        => await db.PurchaseOrders.AddAsync(purchaseOrder, ct);
+
+    public Task<int> CountByPoNoPrefixAsync(string prefix, CancellationToken ct = default)
+        => db.PurchaseOrders.AsNoTracking().CountAsync(p => p.PoNo.StartsWith(prefix), ct);
+
+    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

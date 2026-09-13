@@ -33,7 +33,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ![Scalar API 文件首頁](images/scalar-overview.png)
 
-互動式 API 文件（Scalar）。左側是十一個端點的中文清單，主頁說明了這個系統在做什麼，
+互動式 API 文件（Scalar）。左側是十四個端點的中文清單，主頁說明了這個系統在做什麼，
 以及兩個最容易答錯的地方 —— 可用庫存與帳上庫存的差別、多階 BOM 用量的分母。
 
 點進任一端點，會看到中文說明、參數型別、curl 範例，以及一個可以直接試打的 Test Request：
@@ -82,7 +82,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 317 個測試（本機有 Ollama 時 347）
+dotnet test                          # 358 個測試（本機有 Ollama 時 388）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
@@ -291,6 +291,28 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 不是「LLM 有沒有因此聽懂追問」。後者需要真實模型與行為評測，用假 LLM 去斷言它聽懂了，
 只會測到自己寫的腳本。
 
+### 3.6c 可寫入工具：AI 提建議，人按核准
+
+```bash
+# AI 端：產生建議。狀態是 PendingApproval，沒有任何採購單成立
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"缺料的部分幫我開採購建議"}'
+
+# 人工端：核准才會產生正式採購單
+curl "http://localhost:5199/api/purchase-suggestions?status=PendingApproval"
+curl -X POST http://localhost:5199/api/purchase-suggestions/PS-20260913-001/approve \
+  -H 'Content-Type: application/json' -d '{"decidedBy":"王採購"}'
+```
+
+**看點**：這是整個系統裡唯一由 AI 寫入的東西，而它刻意不是採購單。
+理由不是籠統的「怕 LLM 出錯」—— 採購會產生對外的金錢承諾，
+而 LLM 的輸入（使用者的一句話、檢索到的文件內容）都是它控制不了的。
+分開之後，最壞的結果就只是多一筆要被駁回的建議。
+
+分界線落在程式碼的哪裡講得出來：`SuggestFromShortagesAsync` 是 AI 唯一通得到的入口，
+只寫得出 PendingApproval；`ApproveAsync` 是唯一會新增採購單的地方，
+只有 HTTP 端點呼叫得到，工具目錄裡沒有任何東西通得到它 —— 這條有測試釘住。
+
 ### 3.7 稽核軌跡
 
 每次工具呼叫都留一筆結構化紀錄：
@@ -414,7 +436,9 @@ LLM 整套換掉、甚至拿掉 AI 助理，Domain 都不該動一行。
 
 四層，由強到弱：
 
-1. **工具只能查，不能寫。** 十個工具沒有一個會寫入資料庫，這是設計上的硬限制。
+1. **工具幾乎只能查。** 十一個工具裡十個是唯讀的；唯一會寫入的
+   `suggest_purchase_order` 寫出來的是待人工確認的建議，碰不到正式採購單。
+   把「AI 能做的事」與「成立對外承諾的事」分開，是設計上的硬限制。
 2. **數字都由後端算好。** 工具回傳固定 schema 的 JSON，LLM 拿到的是計算結果不是原始資料。
    連「兩筆檢驗紀錄加總」這種小事都在後端做完。
 3. **system prompt 明文禁止推算**，並規定工具失敗時如實回報。
@@ -510,7 +534,7 @@ CI 上會真的跑它（獨立的 `retrieval-quality` job，裝 Ollama 並 pull 
 Application 因此知道了「有相似度這回事」，而下一步就會有人把門檻判斷搬上去，
 那會讓防幻覺的判準離開可測試的位置。
 
-代價是十個工具裡有一個長得不一樣，這是個需要解釋的結構而不是一眼看懂的結構。
+代價是十一個工具裡有一個長得不一樣，這是個需要解釋的結構而不是一眼看懂的結構。
 取捨寫在 [rag-module-plan-v1](rag-module-plan-v1.md) 決策 D5，架構測試
 （`Domain與Application都不得相依於Rag子系統`）把它釘住。
 

@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.AddScoped<WorkOrderRiskService>();
         services.AddScoped<MrpCalculationService>();
         services.AddScoped<PurchasingQueryService>();
+        services.AddScoped<PurchaseSuggestionService>();
         services.AddScoped<QualityInspectionQueryService>();
 
         return services;

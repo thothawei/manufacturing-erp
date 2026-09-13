@@ -10,6 +10,7 @@ using Erp.Application.Mrp;
 using Erp.Application.Production;
 using Erp.Application.Purchasing;
 using Erp.Application.Quality;
+using Erp.Domain.Purchasing;
 using Erp.Infrastructure;
 using Erp.Infrastructure.AI;
 using Erp.Infrastructure.Json;
@@ -51,7 +52,7 @@ builder.Services.AddOpenApi(options =>
         document.Info.Description =
             "Clean Architecture 分層的製造業 ERP。\n\n"
             + "除了一般的查詢端點，另有一個以 tool-use 驅動的 AI 助理："
-            + "使用者用自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答，"
+            + "使用者用自然語言提問，AI 透過十一個工具查詢系統資料後回答，"
             + "所有數字都由後端算好，LLM 不做任何計算。\n\n"
             + "**兩個容易答錯的地方**：可行性判斷一律以可用庫存（帳上減已保留）為準；"
             + "多階 BOM 的用量以最終成品一個單位為分母，中間階已逐層累乘。";
@@ -132,7 +133,9 @@ app.MapPost("/api/ai-assistant/ask", async (
     })
     .WithSummary("AI 助理問答")
     .WithDescription(
-        "以自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
+        "以自然語言提問，AI 透過十一個工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
+        "十個工具是唯讀的；唯一會寫入的 suggest_purchase_order 產生的是待人工確認的採購建議，" +
+        "不會成立採購單。" +
         "一次請求內部會有多輪 LLM 與工具的往返（上限 5 輪）。" +
         "回應會帶一個 conversationId，下次請求帶著它就能接續同一段對話（記憶最近 6 輪問答，" +
         "存在記憶體、閒置 60 分鐘後丟棄，服務重啟即消失）。不帶或帶一個已失效的識別碼都會開始新對話。" +
@@ -140,6 +143,38 @@ app.MapPost("/api/ai-assistant/ask", async (
         "quality 品保），不給則不限。這是工具層級的邊界，不是資料列層級的隔離 —— " +
         "允許的工具查得到全庫資料。不同角色的對話歷史互相隔離。" +
         "需要設定 Anthropic API 金鑰，未設定時回 503。");
+
+// 採購建議的人工確認流程。
+//
+// 這三個端點刻意**不是** AI 工具：AI 只能產生「待人工確認」的建議
+// （suggest_purchase_order），把建議變成正式採購單必須有人按下核准。
+// 即使 LLM 已經被限制只能呼叫工具、不能寫 SQL，寫入類的操作仍然多一層人工確認 ——
+// 採購會產生對外的金錢承諾，而 LLM 的輸入（使用者的一句話、檢索到的文件內容）
+// 都是它控制不了的。
+app.MapGet("/api/purchase-suggestions", async (
+        PurchaseSuggestionStatus? status, PurchaseSuggestionService service, CancellationToken ct)
+    => Results.Ok(await service.ListAsync(status, ct)))
+    .WithSummary("採購建議清單")
+    .WithDescription(
+        "列出 AI 產生的採購建議，可用 status 過濾（PendingApproval 待確認／Approved 已核准／" +
+        "Rejected 已駁回）。待確認的建議尚未成立任何採購單。");
+
+app.MapPost("/api/purchase-suggestions/{suggestionNo}/approve", async (
+        string suggestionNo, DecisionRequest request,
+        PurchaseSuggestionService service, CancellationToken ct)
+    => Results.Ok(await service.ApproveAsync(suggestionNo, request.DecidedBy, ct)))
+    .WithSummary("核准採購建議")
+    .WithDescription(
+        "把建議轉成正式採購單，回傳的 createdPoNo 就是新產生的採購單號。" +
+        "這是整個系統唯一會新增採購單的路徑，AI 的工具目錄裡沒有任何東西通得到這裡。" +
+        "已核准或已駁回的建議不能重複處理（回 409）—— 重複核准會變成兩張採購單。");
+
+app.MapPost("/api/purchase-suggestions/{suggestionNo}/reject", async (
+        string suggestionNo, DecisionRequest request,
+        PurchaseSuggestionService service, CancellationToken ct)
+    => Results.Ok(await service.RejectAsync(suggestionNo, request.DecidedBy, ct)))
+    .WithSummary("駁回採購建議")
+    .WithDescription("把建議標記為已駁回，不會產生採購單。已處理過的建議不能重複駁回（回 409）。");
 
 // 以下端點目前是給人驗證資料層用的；Phase 2 的 AI 助理會改用同一批 Application 服務
 app.MapGet("/api/items/search", async (string keyword, ItemMasterQueryService service, CancellationToken ct)
@@ -220,6 +255,10 @@ app.Run();
 public partial class Program;
 
 public sealed record AskRequest(string Question, string? ConversationId = null, string? Role = null);
+
+/// 核准／駁回時要指明是誰做的決定。沒有身分驗證，所以這是一筆稽核紀錄，
+/// 不是一道權限檢查 —— README 的已知限制有寫明。
+public sealed record DecisionRequest(string DecidedBy);
 
 public partial class Program
 {

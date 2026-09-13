@@ -4,8 +4,9 @@ namespace Erp.Infrastructure.AI;
 
 /// 所有工具的定義集中在這裡一份。
 ///
-/// 十個工具全部都是唯讀查詢，沒有一個會寫入資料庫
-/// （見 docs/ai-assistant-module-plan-v2.md 第 3 節）。
+/// 前十個工具都是唯讀查詢。第十一個 suggest_purchase_order 是唯一會寫入的，
+/// 而它寫的是一筆「待人工確認」的建議 —— 沒有任何工具通得到正式採購單
+/// （見 docs/ai-assistant-module-plan-v2.md 第 3 節與 README 的「可寫入工具」）。
 ///
 /// 每個工具的說明都寫明「數量單位」與「回傳什麼」，這是防幻覺的第一道：
 /// 讓 LLM 沒有自行揣測欄位語意的空間。
@@ -21,6 +22,9 @@ public static class ToolCatalog
     public const string ListOpenPurchaseOrders = "list_open_purchase_orders";
     public const string GetQualityInspectionSummary = "get_quality_inspection_summary";
     public const string SearchDocuments = "search_documents";
+
+    /// 唯一會寫入的工具，而且它寫的是「待人工確認的建議」，不是採購單本身
+    public const string SuggestPurchaseOrder = "suggest_purchase_order";
 
     public static readonly IReadOnlyList<ToolDefinition> All =
     [
@@ -206,6 +210,30 @@ public static class ToolCatalog
                 ["work_order_no"] = Schema(new { type = "string", description = "只看單一工單時填入" }),
                 ["date_range_start"] = Schema(new { type = "string", description = "起始日期，格式 YYYY-MM-DD" }),
                 ["date_range_end"] = Schema(new { type = "string", description = "結束日期，格式 YYYY-MM-DD" })
+            },
+            []),
+
+        new ToolDefinition(
+            SuggestPurchaseOrder,
+            """
+            依 MRP 缺料試算產生採購建議。**這個工具會寫入資料，但它不會下單。**
+            它建立的是狀態為「待人工確認」的建議紀錄，必須由人在採購建議清單上核准，
+            才會變成正式採購單。回答時一定要講清楚這一點 ——
+            說成「已經幫你下單」是錯的，使用者會以為料已經在路上。
+
+            回傳 created（這次新增的建議，每筆含 suggestion_no 建議單號、item_code、
+            suggested_qty 建議採購量、supplier_code、needed_by_date 需求日期、
+            reason 建議理由、status 狀態）、skipped_item_codes（已經有待確認建議、
+            因此沒有重複產生的料號）、note（給使用者的說明，請照實轉述）。
+
+            建議採購量直接來自 MRP 的 suggested_order_qty，不要自己改動。
+            目前沒有缺料時不會產生任何建議，這是正常結果，不是失敗。
+            使用者只是想知道「缺多少、要訂多少」時用 run_mrp_shortage_analysis 就好，
+            這個工具只在他明確要求「幫我開採購建議」「列出要下的單」時使用。
+            """,
+            new Dictionary<string, JsonElement>
+            {
+                ["item_code"] = Schema(new { type = "string", description = "只針對單一料號提建議時填入，不填則涵蓋全部缺料料件" })
             },
             []),
 

@@ -54,6 +54,27 @@ public sealed class PurchaseOrderConfiguration : IEntityTypeConfiguration<Purcha
     }
 }
 
+public sealed class PurchaseSuggestionConfiguration : IEntityTypeConfiguration<PurchaseSuggestion>
+{
+    public void Configure(EntityTypeBuilder<PurchaseSuggestion> builder)
+    {
+        builder.ToTable("purchase_suggestions");
+        builder.HasKey(s => s.SuggestionNo);
+        builder.Property(s => s.SuggestionNo).HasMaxLength(50);
+        builder.Property(s => s.ItemCode).HasMaxLength(50).IsRequired();
+        builder.Property(s => s.SupplierCode).HasMaxLength(50);
+        builder.Property(s => s.Reason).HasMaxLength(500).IsRequired();
+        builder.Property(s => s.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(s => s.DecidedBy).HasMaxLength(100);
+        builder.Property(s => s.CreatedPoNo).HasMaxLength(50);
+
+        builder.Ignore(s => s.IsPending);
+
+        // 查「這個料號還有沒有待審的建議」是去重的關鍵路徑
+        builder.HasIndex(s => new { s.ItemCode, s.Status });
+    }
+}
+
 public sealed class QualityInspectionConfiguration : IEntityTypeConfiguration<QualityInspection>
 {
     public void Configure(EntityTypeBuilder<QualityInspection> builder)
