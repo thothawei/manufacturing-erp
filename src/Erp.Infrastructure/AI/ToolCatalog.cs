@@ -4,7 +4,7 @@ namespace Erp.Infrastructure.AI;
 
 /// 所有工具的定義集中在這裡一份。
 ///
-/// 九個工具全部都是唯讀查詢，沒有一個會寫入資料庫
+/// 十個工具全部都是唯讀查詢，沒有一個會寫入資料庫
 /// （見 docs/ai-assistant-module-plan-v2.md 第 3 節）。
 ///
 /// 每個工具的說明都寫明「數量單位」與「回傳什麼」，這是防幻覺的第一道：
@@ -17,6 +17,7 @@ public static class ToolCatalog
     public const string GetWorkOrderProgress = "get_work_order_progress";
     public const string ListWorkOrdersAtRisk = "list_work_orders_at_risk";
     public const string RunMrpShortageAnalysis = "run_mrp_shortage_analysis";
+    public const string RunMrpTimePhasedAnalysis = "run_mrp_time_phased_analysis";
     public const string ListOpenPurchaseOrders = "list_open_purchase_orders";
     public const string GetQualityInspectionSummary = "get_quality_inspection_summary";
     public const string SearchDocuments = "search_documents";
@@ -140,6 +141,37 @@ public static class ToolCatalog
                     description = "規劃期間天數，不給時預設 30 天"
                 }),
                 ["item_code"] = Schema(new { type = "string", description = "只看單一料號時填入，不填則回傳全部缺料料件" })
+            },
+            []),
+
+        new ToolDefinition(
+            RunMrpTimePhasedAnalysis,
+            """
+            MRP 時間分期試算：回答「什麼時候會開始缺料」，而不是「總共缺多少」。
+            把未來切成以週為單位的時間桶（預設 8 週，今天起算每 7 天一桶），
+            每一桶累計預期入庫（在途採購到貨）與預期需求（工單材料需求，依交期落桶），
+            算出每一桶期末的預估庫存水位。
+            回傳每個料號的 opening_available_qty（期初可用庫存）、
+            buckets（時間桶清單，每桶含 week_index 週次、week_start／week_end 起訖日、
+            scheduled_receipt_qty 預期入庫、requirement_qty 需求、
+            projected_on_hand_qty 期末預估庫存水位，可能為負）、
+            first_shortage_week（水位第一次轉負的週次，不會缺料時為 null）、
+            first_shortage_date（該週起始日）。
+            逾期未結案的工單需求與早該到卻未到的採購單都算在第 1 桶。
+            已全數發料的工單不列入需求。
+
+            問「總共缺多少、要訂多少」用 run_mrp_shortage_analysis，
+            問「什麼時候會缺、撐得到幾週」才用這個工具。
+            這個工具不產生建議採購量。
+            """,
+            new Dictionary<string, JsonElement>
+            {
+                ["weeks"] = Schema(new
+                {
+                    type = "integer",
+                    description = "要分幾週（1 到 52），不給時預設 8 週"
+                }),
+                ["item_code"] = Schema(new { type = "string", description = "只看單一料號時填入，不填則回傳全部有需求的料件" })
             },
             []),
 

@@ -96,6 +96,10 @@ public sealed class ToolDispatcher(
                     OptionalInt(arguments, "planning_horizon_days"),
                     OptionalString(arguments, "item_code"), ct)),
 
+                ToolCatalog.RunMrpTimePhasedAnalysis => Ok(await mrpCalculationService.RunTimePhasedAnalysisAsync(
+                    OptionalInt(arguments, "weeks"),
+                    OptionalString(arguments, "item_code"), ct)),
+
                 ToolCatalog.ListOpenPurchaseOrders => Ok(await purchasingQueryService.GetOpenPurchaseOrdersAsync(
                     OptionalString(arguments, "supplier_code"),
                     OptionalString(arguments, "item_code"), ct)),

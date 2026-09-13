@@ -41,6 +41,180 @@ public class MrpCalculationServiceTests
             Status = WorkOrderStatus.Released
         };
 
+    /// 三張各 50 台的 TV 工單，交期分別落在第 1、2、4 週，每張吃掉 100 片面板。
+    /// 期初可用 200 片 —— 總量看起來只缺 100 片，但真正的問題是「第 4 週就見底」。
+    private static MrpCalculationService CreateTimePhasedScenario(
+        IEnumerable<PurchaseOrder>? purchaseOrders = null)
+        => CreateService(
+            [
+                Wo("WO-W1", new DateOnly(2026, 9, 13), qty: 50m),
+                Wo("WO-W2", new DateOnly(2026, 9, 20), qty: 50m),
+                Wo("WO-W4", new DateOnly(2026, 10, 2), qty: 50m),
+            ],
+            [TestData.Balance("PANEL-01", 200m), TestData.Balance("SCREW-05", 100_000m)],
+            purchaseOrders);
+
+    [Fact]
+    public async Task 時間分期_總量看起來夠但第四週見底()
+    {
+        var result = await CreateTimePhasedScenario().RunTimePhasedAnalysisAsync(itemCode: "PANEL-01");
+
+        var panel = Assert.Single(result.Items);
+        Assert.Equal(200m, panel.OpeningAvailableQty);
+
+        // 期末水位：200 → 100 → 0 → 0 → -100
+        Assert.Equal(100m, panel.Buckets[0].ProjectedOnHandQty);
+        Assert.Equal(0m, panel.Buckets[1].ProjectedOnHandQty);
+        Assert.Equal(0m, panel.Buckets[2].ProjectedOnHandQty);
+        Assert.Equal(-100m, panel.Buckets[3].ProjectedOnHandQty);
+
+        Assert.Equal(4, panel.FirstShortageWeek);
+        Assert.Equal(new DateOnly(2026, 10, 1), panel.FirstShortageDate);
+    }
+
+    [Fact]
+    public async Task 時間分期_回答的是不分期版本回答不了的問題()
+    {
+        // 同一組資料，兩條路徑的總量一致 —— 差別在於分期版本說得出「什麼時候」。
+        var service = CreateTimePhasedScenario();
+
+        var flat = await service.RunShortageAnalysisAsync(planningHorizonDays: 60, itemCode: "PANEL-01");
+        var phased = await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01");
+
+        var flatPanel = Assert.Single(flat.ShortageItems);
+        Assert.Equal(300m, flatPanel.GrossRequirementQty);
+        Assert.Equal(100m, flatPanel.NetShortageQty);
+
+        var phasedPanel = Assert.Single(phased.Items);
+        Assert.Equal(300m, phasedPanel.Buckets.Sum(b => b.RequirementQty));
+        Assert.Equal(-100m, phasedPanel.Buckets[^1].ProjectedOnHandQty);
+        Assert.Equal(4, phasedPanel.FirstShortageWeek);
+    }
+
+    [Fact]
+    public async Task 時間分期_及時到貨的採購單會把水位補回來()
+    {
+        var service = CreateTimePhasedScenario(
+        [
+            new PurchaseOrder
+            {
+                PoNo = "PO-W3", SupplierCode = "SUP-008", ItemCode = "PANEL-01",
+                OrderedQty = 100m, ReceivedQty = 0m,
+                ExpectedArrivalDate = new DateOnly(2026, 9, 28),   // 第 3 週
+                Status = PurchaseOrderStatus.Open
+            }
+        ]);
+
+        var panel = Assert.Single((await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01")).Items);
+
+        Assert.Equal(100m, panel.Buckets[2].ScheduledReceiptQty);
+        Assert.Equal(100m, panel.Buckets[2].ProjectedOnHandQty);
+        Assert.Equal(0m, panel.Buckets[3].ProjectedOnHandQty);
+        Assert.Null(panel.FirstShortageWeek);      // 補得上就不算缺料
+    }
+
+    [Fact]
+    public async Task 時間分期_晚到的採購單救不了已經發生的缺口()
+    {
+        // 同樣 100 片，晚三週到 —— 總量一樣，結論完全不同。
+        // 這正是不分期版本看不出來的那件事。
+        var service = CreateTimePhasedScenario(
+        [
+            new PurchaseOrder
+            {
+                PoNo = "PO-W7", SupplierCode = "SUP-008", ItemCode = "PANEL-01",
+                OrderedQty = 100m, ReceivedQty = 0m,
+                ExpectedArrivalDate = new DateOnly(2026, 10, 26),  // 第 7 週
+                Status = PurchaseOrderStatus.Open
+            }
+        ]);
+
+        var panel = Assert.Single((await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01")).Items);
+
+        Assert.Equal(4, panel.FirstShortageWeek);
+        Assert.Equal(0m, panel.Buckets[6].ProjectedOnHandQty);   // 第 7 週才補回來，缺口已經發生過
+    }
+
+    [Fact]
+    public async Task 時間分期_逾期的需求與逾期未到的採購單都落在第一桶()
+    {
+        var service = CreateService(
+            [Wo("WO-OVERDUE", new DateOnly(2026, 8, 20), qty: 50m)],   // 三週前就該交
+            [TestData.Balance("PANEL-01", 20m), TestData.Balance("SCREW-05", 100_000m)],
+            [
+                new PurchaseOrder
+                {
+                    PoNo = "PO-LATE", SupplierCode = "SUP-008", ItemCode = "PANEL-01",
+                    OrderedQty = 30m, ReceivedQty = 0m,
+                    ExpectedArrivalDate = new DateOnly(2026, 9, 1),    // 早該到卻還沒到
+                    Status = PurchaseOrderStatus.Open
+                }
+            ]);
+
+        var panel = Assert.Single((await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01")).Items);
+
+        Assert.Equal(100m, panel.Buckets[0].RequirementQty);        // 50 台 ×2
+        Assert.Equal(30m, panel.Buckets[0].ScheduledReceiptQty);
+        Assert.Equal(-50m, panel.Buckets[0].ProjectedOnHandQty);    // 20 + 30 - 100
+        Assert.Equal(1, panel.FirstShortageWeek);
+    }
+
+    [Fact]
+    public async Task 時間分期_庫存充足時沒有缺料週次()
+    {
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13), qty: 50m)],
+            [TestData.Balance("PANEL-01", 100_000m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var panel = Assert.Single((await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01")).Items);
+
+        Assert.Null(panel.FirstShortageWeek);
+        Assert.Null(panel.FirstShortageDate);
+        Assert.All(panel.Buckets, b => Assert.True(b.ProjectedOnHandQty >= 0));
+    }
+
+    [Fact]
+    public async Task 時間分期_已全數發料的工單同樣不計入需求()
+    {
+        var service = CreateService(
+            [new WorkOrder
+            {
+                WorkOrderNo = "WO-ISSUED", ItemCode = "TV-100", PlannedQty = 100m,
+                DueDate = new DateOnly(2026, 9, 13), Status = WorkOrderStatus.Released,
+                MaterialIssueStatus = MaterialIssueStatuses.FullyIssued
+            }],
+            [TestData.Balance("PANEL-01", 50m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var result = await service.RunTimePhasedAnalysisAsync();
+
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task 時間分期_桶數與區間長度對得上()
+    {
+        var result = await CreateTimePhasedScenario().RunTimePhasedAnalysisAsync(weeks: 4);
+
+        Assert.Equal(4, result.WeekCount);
+        Assert.Equal(new DateOnly(2026, 9, 10), result.HorizonStart);
+        Assert.Equal(new DateOnly(2026, 10, 7), result.HorizonEnd);   // 4 週 × 7 天 - 1
+
+        var panel = result.Items.Single(i => i.ItemCode == "PANEL-01");
+        Assert.Equal(4, panel.Buckets.Count);
+        Assert.Equal(new DateOnly(2026, 9, 10), panel.Buckets[0].WeekStart);
+        Assert.Equal(new DateOnly(2026, 9, 16), panel.Buckets[0].WeekEnd);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(53)]
+    public async Task 時間分期_週數不合理時擲出參數例外(int weeks)
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => CreateTimePhasedScenario().RunTimePhasedAnalysisAsync(weeks));
+    }
+
     [Fact]
     public async Task 已全數發料的工單不再計入毛需求()
     {

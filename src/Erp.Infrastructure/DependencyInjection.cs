@@ -36,7 +36,7 @@ public static class DependencyInjection
         services.AddScoped<ToolDispatcher>();
         services.AddScoped<IAiAssistantService, AiAssistantService>();
 
-        // ToolDispatcher 在編譯期就相依 DocumentSearchService（第九個工具），
+        // ToolDispatcher 在編譯期就相依 DocumentSearchService（RAG 那個工具），
         // 所以這裡一併註冊 —— 分開讓呼叫端自己記得註冊，漏了只會在執行時才炸
         services.AddRag(configuration);
 

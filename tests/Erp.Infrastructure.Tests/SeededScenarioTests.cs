@@ -122,6 +122,33 @@ public class SeededScenarioTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MRP時間分期_面板第一週就見底_第二週到貨補不滿()
+    {
+        var db = _fixture.CreateContext();
+        var service = new MrpCalculationService(
+            new WorkOrderRepository(db), new ItemRepository(db), new InventoryRepository(db),
+            new PurchaseOrderRepository(db), CreateBomService(), _clock);
+
+        var result = await service.RunTimePhasedAnalysisAsync(itemCode: "PANEL-01");
+
+        var panel = Assert.Single(result.Items);
+        Assert.Equal(80m, panel.OpeningAvailableQty);
+
+        // 第 1 週：WO-01 的 100 台 TV 要 200 片，庫存只有 80 → 直接見底
+        Assert.Equal(200m, panel.Buckets[0].RequirementQty);
+        Assert.Equal(-120m, panel.Buckets[0].ProjectedOnHandQty);
+        Assert.Equal(1, panel.FirstShortageWeek);
+
+        // 第 2 週：已下單的 30 片到貨 —— 補得回一點，但缺口還在
+        Assert.Equal(30m, panel.Buckets[1].ScheduledReceiptQty);
+        Assert.Equal(-90m, panel.Buckets[1].ProjectedOnHandQty);
+
+        // 第 7 週：遠期那張 MON-200 工單（30 台 ×1）才進來
+        Assert.Equal(30m, panel.Buckets[6].RequirementQty);
+        Assert.Equal(-120m, panel.Buckets[6].ProjectedOnHandQty);
+    }
+
+    [Fact]
     public async Task MRP試算_庫存充足的料件不會出現在缺料清單()
     {
         var db = _fixture.CreateContext();

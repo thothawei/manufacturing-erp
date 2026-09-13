@@ -3,15 +3,15 @@
 [![CI](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/thothawei/manufacturing-erp/actions/workflows/ci.yml)
 
 Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI 助理：
-使用者用自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
-第九個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
+使用者用自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答，所有數字都由後端算好。
+最後一個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
 
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-263 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 272；
+277 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 286；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -88,7 +88,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -182,9 +182,9 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 通過時會把逐輪對話寫成 `docs/verification/` 底下的純文字紀錄（金鑰已遮蔽），
 讓這次驗證可以被歸檔，而不是跑完就散在 console 裡。
 
-### 九個工具
+### 十個工具
 
-全部都是唯讀查詢，沒有一個會寫入資料庫。前八個都只是薄薄一層，
+全部都是唯讀查詢，沒有一個會寫入資料庫。前九個都只是薄薄一層，
 把參數轉交給既有的 Application Service，數字一律由後端算好。
 
 | 工具 | 對應服務 |
@@ -195,6 +195,7 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 | `get_work_order_progress` | `WorkOrderProgressService` |
 | `list_work_orders_at_risk` | `WorkOrderRiskService` |
 | `run_mrp_shortage_analysis` | `MrpCalculationService` |
+| `run_mrp_time_phased_analysis` | `MrpCalculationService`（時間分期：什麼時候會缺，不是缺多少） |
 | `list_open_purchase_orders` | `PurchasingQueryService` |
 | `get_quality_inspection_summary` | `QualityInspectionQueryService` |
 | `search_documents` | `DocumentSearchService`（`Infrastructure/Rag`，不經 Application） |
@@ -432,7 +433,7 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 而它原本被寫在 README 的「尚未處理」裡當成一條可以接受的已知限制。
 
 **一致性測試會被新工具反咬**（做 RAG 時踩到）：`ToolCatalogConsistencyTests` 會走訪每個工具
-並斷言它不回錯誤，而 CI 上沒有 Ollama —— 第九個工具必然讓那兩條 Theory 變紅。
+並斷言它不回錯誤，而 CI 上沒有 Ollama —— 檢索那個工具必然讓那兩條 Theory 變紅。
 這讓 `IEmbeddingClient` 從「將來換供應商」的裝飾性抽象變成**必需品**：
 測試要注入固定向量的假實作才能離線跑。抽象的真正理由常常不是原本宣稱的那個。
 
@@ -451,13 +452,13 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-263 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 272 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+277 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 286 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 51 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 183（+9 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Application.Tests` | 62 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 186（+9 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 

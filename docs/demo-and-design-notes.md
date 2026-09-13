@@ -33,7 +33,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ![Scalar API 文件首頁](images/scalar-overview.png)
 
-互動式 API 文件（Scalar）。左側是十個端點的中文清單，主頁說明了這個系統在做什麼，
+互動式 API 文件（Scalar）。左側是十一個端點的中文清單，主頁說明了這個系統在做什麼，
 以及兩個最容易答錯的地方 —— 可用庫存與帳上庫存的差別、多階 BOM 用量的分母。
 
 點進任一端點，會看到中文說明、參數型別、curl 範例，以及一個可以直接試打的 Test Request：
@@ -60,7 +60,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 
 金鑰存在專案外（`~/.microsoft/usersecrets/`），不可能被誤 commit —— 這個 repo 是公開的。
 
-**文件語意檢索（第 9 個工具）需要本機 Ollama，但它是可選的。** 沒裝的話啟動時印：
+**文件語意檢索（RAG 那個工具）需要本機 Ollama，但它是可選的。** 沒裝的話啟動時印：
 
 ```
 文件語意檢索：索引 0 段，模型 bge-m3，相似度門檻 0.5（索引未建立：需要本機 Ollama 並執行 ollama pull bge-m3；其他八個工具不受影響）
@@ -82,7 +82,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 263 個測試（本機有 Ollama 時 272）
+dotnet test                          # 277 個測試（本機有 Ollama 時 286）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
@@ -197,6 +197,36 @@ curl "http://localhost:5199/api/mrp/shortages"
   趕不上 9/13 的需求日，所以不能算成供給。
 - `suggestedOrderQty` 是 150 而不是 120 —— 套用了訂購倍量 50。
   這個數字要直接引用，system prompt 明文禁止 LLM 自己從缺料量推算。
+
+### 3.4b MRP 時間分期：什麼時候開始缺，不是缺多少
+
+```bash
+curl "http://localhost:5199/api/mrp/time-phased?itemCode=PANEL-01"
+```
+
+```json
+{"basis":"available","horizonStart":"2026-09-10","horizonEnd":"2026-11-04","weekCount":8,
+ "items":[{"itemCode":"PANEL-01","itemName":"面板","openingAvailableQty":80,
+   "buckets":[{"weekIndex":1,"weekStart":"2026-09-10","weekEnd":"2026-09-16",
+     "scheduledReceiptQty":0,"requirementQty":200,"projectedOnHandQty":-120},
+    {"weekIndex":2,"weekStart":"2026-09-17","weekEnd":"2026-09-23",
+     "scheduledReceiptQty":30,"requirementQty":0,"projectedOnHandQty":-90}],
+   "firstShortageWeek":1,"firstShortageDate":"2026-09-10"}]}
+```
+
+（上面只節錄前兩桶，實際回八桶。）
+
+**看點**：上一節的 `/api/mrp/shortages` 只回答「總共缺 120 片」，
+這裡回答的是「第 1 週就見底、第 2 週那 30 片到了也只補到 -90」。
+需求分散在不同交期時這兩個答案可以差很多 —— 總量看起來夠，卻在第三週先見底，
+後面的入庫再多也來不及。這正是不分期的版本結構上看不出來的事。
+
+刻意**不做** lot-sizing（EOQ、Wagner-Whitin 那類批量最佳化）：這裡要展示的是
+「時間分期怎麼用資料結構表達」，不是重寫一套供應鏈最佳化引擎。建議採購量仍由
+`/api/mrp/shortages` 那條路徑的最小訂購量／訂購倍量規則產生，兩個端點各司其職。
+
+桶以「今天起算每 7 天」切，不對齊日曆週 —— 對齊的話第一桶會是長度不定的殘週，
+「第一週就缺料」這種結論會隨著今天是星期幾而改變。
 
 ### 3.5 品管：後端先彙總，不讓 LLM 加總
 
@@ -362,7 +392,7 @@ LLM 整套換掉、甚至拿掉 AI 助理，Domain 都不該動一行。
 
 四層，由強到弱：
 
-1. **工具只能查，不能寫。** 九個工具沒有一個會寫入資料庫，這是設計上的硬限制。
+1. **工具只能查，不能寫。** 十個工具沒有一個會寫入資料庫，這是設計上的硬限制。
 2. **數字都由後端算好。** 工具回傳固定 schema 的 JSON，LLM 拿到的是計算結果不是原始資料。
    連「兩筆檢驗紀錄加總」這種小事都在後端做完。
 3. **system prompt 明文禁止推算**，並規定工具失敗時如實回報。
@@ -456,7 +486,7 @@ CI 上會真的跑它（獨立的 `retrieval-quality` job，裝 Ollama 並 pull 
 Application 因此知道了「有相似度這回事」，而下一步就會有人把門檻判斷搬上去，
 那會讓防幻覺的判準離開可測試的位置。
 
-代價是九個工具裡有一個長得不一樣，這是個需要解釋的結構而不是一眼看懂的結構。
+代價是十個工具裡有一個長得不一樣，這是個需要解釋的結構而不是一眼看懂的結構。
 取捨寫在 [rag-module-plan-v1](rag-module-plan-v1.md) 決策 D5，架構測試
 （`Domain與Application都不得相依於Rag子系統`）把它釘住。
 

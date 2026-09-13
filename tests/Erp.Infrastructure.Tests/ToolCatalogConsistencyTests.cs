@@ -136,6 +136,7 @@ public class ToolCatalogConsistencyTests : IAsyncLifetime
             (_, "work_order_no") => $"WO-{Stamp}-01",
             (_, "supplier_code") => "SUP-008",
             (_, "planning_horizon_days") => 30,
+            (_, "weeks") => 8,
             (_, "window_days") => 14,
             (_, "date_range_start") => "2026-09-01",
             (_, "date_range_end") => "2026-09-30",

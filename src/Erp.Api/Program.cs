@@ -51,7 +51,7 @@ builder.Services.AddOpenApi(options =>
         document.Info.Description =
             "Clean Architecture 分層的製造業 ERP。\n\n"
             + "除了一般的查詢端點，另有一個以 tool-use 驅動的 AI 助理："
-            + "使用者用自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答，"
+            + "使用者用自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答，"
             + "所有數字都由後端算好，LLM 不做任何計算。\n\n"
             + "**兩個容易答錯的地方**：可行性判斷一律以可用庫存（帳上減已保留）為準；"
             + "多階 BOM 的用量以最終成品一個單位為分母，中間階已逐層累乘。";
@@ -123,7 +123,7 @@ app.MapPost("/api/ai-assistant/ask", async (
     })
     .WithSummary("AI 助理問答")
     .WithDescription(
-        "以自然語言提問，AI 透過九個唯讀工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
+        "以自然語言提問，AI 透過十個唯讀工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
         "一次請求內部會有多輪 LLM 與工具的往返（上限 5 輪），但不保存跨請求的對話記憶。" +
         "需要設定 Anthropic API 金鑰，未設定時回 503。");
 
@@ -168,6 +168,16 @@ app.MapGet("/api/work-orders/at-risk", async (
         "不指定 from 時，已逾交期但尚未結案的舊工單一律納入 —— 它們是最急的風險。" +
         "風險來源有兩種：已逾交期未完工，或剩餘產量的物料不足。" +
         "delayDays 為 0 代表有風險但目前還趕得上。");
+
+app.MapGet("/api/mrp/time-phased", async (
+        int? weeks, string? itemCode, MrpCalculationService service, CancellationToken ct)
+    => Results.Ok(await service.RunTimePhasedAnalysisAsync(weeks, itemCode, ct)))
+    .WithSummary("MRP 時間分期試算")
+    .WithDescription(
+        "回答「什麼時候會開始缺料」。把未來切成以週為單位的時間桶（預設 8 週，今天起算每 7 天），" +
+        "每桶累計預期入庫與需求，算出期末預估庫存水位，並指出水位第一次轉負的週次。" +
+        "逾期未結案的需求與早該到卻未到的採購單都算在第 1 桶。不產生建議採購量 —— " +
+        "那是 /api/mrp/shortages 的職責。");
 
 app.MapGet("/api/mrp/shortages", async (
         int? planningHorizonDays, string? itemCode, MrpCalculationService service, CancellationToken ct)
