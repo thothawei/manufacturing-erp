@@ -11,9 +11,11 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-255 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 264）。
+255 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 264；
+另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
+這件事現在有一組隨時可跑的測試在等金鑰 —— 見「真實 API 驗證怎麼跑」。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
 見「為什麼不是 nomic-embed-text」。
 
@@ -98,7 +100,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 2 — Infrastructure.AI 與 tool-use 迴圈 | 完成；**尚未對真實 API 驗證過**（見下方） |
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
 | Phase 3.5 — 規劃對帳後補齊的缺口（錯誤處理、錯誤碼、稽核 log、user-secrets） | 完成 |
-| Phase 4 — 展示準備 | 完成（`docs/demo-and-design-notes.md`）；真實 API 驗證待金鑰 |
+| Phase 4 — 展示準備 | 完成（`docs/demo-and-design-notes.md`）；真實 API 驗證的測試已就緒，待金鑰實跑 |
 | Phase 5 — 文件語意檢索（RAG，第 9 個工具） | 完成，已對真實 Ollama 實跑驗證（實測換掉了預設 embedding 模型） |
 
 ### 八個 Application 服務（AI 工具背後真正做事的地方）
@@ -154,6 +156,29 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 ```
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
+
+### 真實 API 驗證怎麼跑
+
+`AnthropicWireFormatTests` 是用本機假伺服器驗的，它照單全收 ——
+工具的 input schema 不合法、beta 標頭被拒、fallback 參數改名，
+測試都會綠，而正式環境第一次呼叫就 400。`AnthropicLiveApiTests` 補的就是這個缺口：
+接**正式端點**跑完整條 tool-use 迴圈。設好金鑰後：
+
+```bash
+dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~AnthropicLive"
+```
+
+沒金鑰時整組 skip（所以預設不會讓任何人的 `dotnet test` 紅掉、也不會花到錢）。
+金鑰沿用上面 user-secrets 的設定，或讀 `ANTHROPIC_API_KEY`。
+
+比照 RAG 那邊的做法，有一個 `ANTHROPIC_REQUIRE_LIVE=1` 開關讓它**不准 skip** ——
+沒有它的話，金鑰忘了設會讓整組安靜變成 skip 而回合照樣綠，那是一條假防線。
+實測：不設金鑰並設這個變數，兩條都以 401 紅掉、0 skip。
+
+斷言刻意寬鬆（真模型的措辭每次都不同，釘字面只會製造脆弱的測試），只釘三件會真的壞掉的事：
+請求有沒有被接受、該用的工具有沒有被選到、回答裡的數字是不是工具回傳的那一個。
+通過時會把逐輪對話寫成 `docs/verification/` 底下的純文字紀錄（金鑰已遮蔽），
+讓這次驗證可以被歸檔，而不是跑完就散在 console 裡。
 
 ### 九個工具
 
@@ -441,6 +466,9 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
   **連選填參數都真的帶進去執行一次**（只測必填的話，選填參數改名不會被發現）。
 - **`AnthropicWireFormatTests`** — 用本機假伺服器接住 SDK 真正送出的 HTTP 請求，
   逐欄檢查 body。不需要金鑰、不花錢。型別轉換編譯得過不代表 wire format 正確。
+- **`AnthropicLiveApiTests`** — 唯一接**真實 Anthropic API** 的一組（沒金鑰時整組 skip）。
+  假伺服器驗得了「我們送出的 JSON 長什麼樣」，驗不了「真實端點收不收」，這組補的是後者。
+  同樣有 `ANTHROPIC_REQUIRE_LIVE` 這個不准 skip 的開關，理由跟 `RAG_REQUIRE_OLLAMA` 一樣。
 - **`QueryEfficiencyTests`** — 斷言查詢次數如何「隨缺料料號數成長」，而不是絕對次數
   （那會隨 BOM 結構改變，只會製造脆弱的測試）。把 N+1 改回去會紅。
 - **`VectorMathTests`** — cosine 的邊界案例：零向量回 0 不回 `NaN`、維度不一致擲例外
@@ -569,7 +597,8 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
   `AskAsync` 預留了加 `conversation_id` 的空間，尚未實作。
 - **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
   送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
-  （本機沒有金鑰）。第一次帶著真金鑰執行時，仍應人工確認一輪完整問答。
+  （本機沒有金鑰）。驗證這件事的測試（`AnthropicLiveApiTests`）已經寫好，
+  設好金鑰跑一次就會產出可歸檔的紀錄 —— 見「真實 API 驗證怎麼跑」。
 - **RAG 的檢索是 brute-force 全表掃描**：每次查詢載入全部向量。33 個片段無感
   （768 維 × 33 段約兩萬次乘加），數萬份文件要換 ANN 索引 —— 那時要換的是
   `DocumentSearchService` 一個類別，不是整個架構。
