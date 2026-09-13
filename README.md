@@ -592,8 +592,6 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）
-- **工單風險的預設區間是本週**：逾期超過一週且未結案的工單不會出現在預設查詢中，
-  需自行指定 `from`。MRP 則已把所有逾期未結案工單納入。
 - **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
   `AskAsync` 預留了加 `conversation_id` 的空間，尚未實作。
 - **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，

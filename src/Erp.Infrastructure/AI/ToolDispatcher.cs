@@ -89,7 +89,8 @@ public sealed class ToolDispatcher(
 
                 ToolCatalog.ListWorkOrdersAtRisk => Ok(await workOrderRiskService.GetAtRiskWorkOrdersAsync(
                     OptionalDate(arguments, "date_range_start"),
-                    OptionalDate(arguments, "date_range_end"), ct)),
+                    OptionalDate(arguments, "date_range_end"),
+                    OptionalInt(arguments, "window_days"), ct)),
 
                 ToolCatalog.RunMrpShortageAnalysis => Ok(await mrpCalculationService.RunShortageAnalysisAsync(
                     OptionalInt(arguments, "planning_horizon_days"),

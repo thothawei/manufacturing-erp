@@ -119,9 +119,9 @@ public class WorkOrderRiskServiceTests
     }
 
     [Fact]
-    public async Task 未指定區間時預設查詢本週()
+    public async Task 未指定區間時查到本週日為止()
     {
-        // Today = 2026-09-10（週四），本週為 09-07(一) ~ 09-13(日)
+        // Today = 2026-09-10（週四），預設查到本週日 09-13
         var service = CreateService(
         [
             Wo("WO-IN", new DateOnly(2026, 9, 11)),
@@ -131,6 +131,65 @@ public class WorkOrderRiskServiceTests
         var risks = await service.GetAtRiskWorkOrdersAsync();
 
         Assert.Equal("WO-IN", Assert.Single(risks).WorkOrderNo);
+    }
+
+    [Fact]
+    public async Task 未指定起始日時上週就逾期的工單仍然看得到()
+    {
+        // 這條釘的是一個實際的漏看：起點若取本週一（09-07），
+        // 08-28 就逾期、至今未結案的工單會被整批濾掉 ——
+        // 而逾期正是兩種風險來源中最急的那一種。
+        var service = CreateService(
+            [Wo("WO-OVERDUE", new DateOnly(2026, 8, 28))],
+            [],
+            [TestData.Balance("PANEL-01", 100_000m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var risks = await service.GetAtRiskWorkOrdersAsync();
+
+        var risk = Assert.Single(risks);
+        Assert.Equal("WO-OVERDUE", risk.WorkOrderNo);
+        Assert.Equal(13, risk.DelayDays);
+    }
+
+    [Fact]
+    public async Task 指定視窗天數時查的是今天起算的那幾天()
+    {
+        // windowDays = 14 → 09-10 ~ 09-23，所以 09-21 那張會進來、09-30 那張不會
+        var service = CreateService(
+        [
+            Wo("WO-IN", new DateOnly(2026, 9, 21)),
+            Wo("WO-OUT", new DateOnly(2026, 9, 30)),
+        ], [], []);
+
+        var risks = await service.GetAtRiskWorkOrdersAsync(windowDays: 14);
+
+        Assert.Equal("WO-IN", Assert.Single(risks).WorkOrderNo);
+    }
+
+    [Fact]
+    public async Task 明確指定的日期區間優先於視窗天數()
+    {
+        // 兩種都給時以日期區間為準：它是更精確的表達。
+        // 若 windowDays 反過來覆蓋日期區間，WO-OUT 就會被濾掉。
+        var service = CreateService(
+            [Wo("WO-OUT", new DateOnly(2026, 9, 30))], [], []);
+
+        var risks = await service.GetAtRiskWorkOrdersAsync(
+            new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), windowDays: 3);
+
+        Assert.Equal("WO-OUT", Assert.Single(risks).WorkOrderNo);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(366)]
+    public async Task 視窗天數不合理時擲出參數例外(int windowDays)
+    {
+        var service = CreateService([], [], []);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.GetAtRiskWorkOrdersAsync(windowDays: windowDays));
     }
 
     [Fact]

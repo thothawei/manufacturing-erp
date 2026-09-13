@@ -157,11 +157,15 @@ app.MapGet("/api/work-orders/{workOrderNo}/progress", async (
     .WithDescription("回傳工單狀態、發料狀態與各途程站別的完工數量。實際產出以最後一站為準。");
 
 app.MapGet("/api/work-orders/at-risk", async (
-        DateOnly? from, DateOnly? to, WorkOrderRiskService service, CancellationToken ct)
-    => Results.Ok(await service.GetAtRiskWorkOrdersAsync(from, to, ct)))
+        DateOnly? from, DateOnly? to, int? windowDays,
+        WorkOrderRiskService service, CancellationToken ct)
+    => Results.Ok(await service.GetAtRiskWorkOrdersAsync(from, to, windowDays, ct)))
     .WithSummary("風險工單清單")
     .WithDescription(
-        "列出交期落在區間內、有延遲風險的未結案工單，不給區間時預設本週。" +
+        "列出交期落在區間內、有延遲風險的未結案工單。" +
+        "區間三種給法：明確的 from／to、從今天起算的 windowDays（1-365），" +
+        "或都不給（預設查到本週日為止）。同時給時以 from／to 為準。" +
+        "不指定 from 時，已逾交期但尚未結案的舊工單一律納入 —— 它們是最急的風險。" +
         "風險來源有兩種：已逾交期未完工，或剩餘產量的物料不足。" +
         "delayDays 為 0 代表有風險但目前還趕得上。");
 

@@ -93,16 +93,29 @@ public static class ToolCatalog
         new ToolDefinition(
             ListWorkOrdersAtRisk,
             """
-            列出交期落在指定區間內、有延遲風險的未結案工單。不給區間時預設查本週（週一到週日）。
+            列出交期落在查詢區間內、有延遲風險的未結案工單。
             風險有兩種來源：已逾交期未完工，或剩餘產量的物料不足。
             回傳 due_date（交期）、delay_days（預估延遲天數）、risk_reason（風險原因，
             缺料時會寫明是哪個零件短少多少）。delay_days 為 0 代表有風險但目前還趕得上。
             缺料判定只針對「剩餘待產數量」，已完工的部分不會重複算料。
+
+            查詢區間有三種指定方式，擇一使用即可：
+            一、使用者講的是明確日期（「九月的工單」）時給 date_range_start 與 date_range_end。
+            二、使用者講的是一段往後的期間（「未來 14 天」「這個月內」）時只給 window_days，
+            　　代表從今天起算幾天，不要同時再給 date_range_start／date_range_end。
+            三、使用者沒講期間（「這週有哪些工單有風險」）時三個參數都不要給，預設查到本週日為止。
+            未指定 date_range_start 時，已逾交期但尚未結案的舊工單一律納入 ——
+            它們是最急的風險，不會因為交期落在查詢區間之前就被濾掉。
             """,
             new Dictionary<string, JsonElement>
             {
                 ["date_range_start"] = Schema(new { type = "string", description = "起始日期，格式 YYYY-MM-DD" }),
-                ["date_range_end"] = Schema(new { type = "string", description = "結束日期，格式 YYYY-MM-DD" })
+                ["date_range_end"] = Schema(new { type = "string", description = "結束日期，格式 YYYY-MM-DD" }),
+                ["window_days"] = Schema(new
+                {
+                    type = "integer",
+                    description = "從今天起算的天數（1 到 365）。給了 date_range_start 與 date_range_end 時不要再給這個參數"
+                })
             },
             []),
 

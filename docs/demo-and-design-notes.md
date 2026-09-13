@@ -160,6 +160,14 @@ curl "http://localhost:5199/api/work-orders/at-risk"
 **看點**：兩張都延遲 2 天，但原因完全不同 —— 一張已經逾期，一張是補料前置期（5 天）
 超過剩餘工作天（3 天）。缺料判定只針對「剩餘待產數量」，已完工的部分不會重複算料。
 
+不給區間時查到本週日為止，**但已逾交期未結案的舊工單一律納入** ——
+逾期是兩種風險來源中最急的那種，不該因為交期落在查詢區間之前就看不到。
+想看更長的期間就給天數（AI 助理聽到「未來 14 天」時傳的也是這個參數）：
+
+```bash
+curl "http://localhost:5199/api/work-orders/at-risk?windowDays=14"
+```
+
 ### 3.4 MRP：建議採購量不是缺料量
 
 ![MRP 端點在 Scalar 中的說明](images/scalar-mrp-endpoint.png)

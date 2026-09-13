@@ -21,10 +21,18 @@ public sealed class WorkOrderRiskService(
     BomExplosionService bomExplosionService,
     IClock clock)
 {
+    /// 預設視窗天數。未指定區間也未指定 windowDays 時，查的是「到本週日為止」。
+    public const int DefaultWindowDays = 7;
+
+    /// 上限存在的理由：LLM 傳一個離譜的天數（例如 36500）時，
+    /// 要以明確的參數錯誤現形，而不是安靜地掃一遍整個資料表。
+    private const int MaxWindowDays = 365;
+
     public async Task<IReadOnlyList<WorkOrderRisk>> GetAtRiskWorkOrdersAsync(
-        DateOnly? from = null, DateOnly? to = null, CancellationToken ct = default)
+        DateOnly? from = null, DateOnly? to = null, int? windowDays = null,
+        CancellationToken ct = default)
     {
-        var (rangeStart, rangeEnd) = ResolveRange(from, to);
+        var (rangeStart, rangeEnd) = ResolveRange(from, to, windowDays);
 
         var workOrders = await workOrderRepository.GetOpenWorkOrdersByDueDateAsync(rangeStart, rangeEnd, ct);
         var risks = new List<WorkOrderRisk>();
@@ -96,9 +104,24 @@ public sealed class WorkOrderRiskService(
         return Math.Max(0, maxLeadTime - daysUntilDue);
     }
 
-    /// 未指定區間時預設為「本週」（週一到週日）
-    private (DateOnly Start, DateOnly End) ResolveRange(DateOnly? from, DateOnly? to)
+    /// 解析查詢區間。三種輸入的優先序（寫進工具說明，LLM 才不會兩種都傳）：
+    ///
+    /// 1. 明確給了 from／to —— 直接用，windowDays 不再參與。
+    /// 2. 只給 windowDays —— 「今天起算 N 天」，讓使用者說得出「未來 14 天」「這個月」。
+    /// 3. 什麼都沒給 —— 到本週日為止（DefaultWindowDays 是這個預設的天數來源）。
+    ///
+    /// 起點未指定時刻意用 MinValue 而不是本週一：已逾交期但尚未結案的工單是最該被看到的
+    /// 那一種風險，以本週一為起點會把上週就逾期的工單整批濾掉 ——
+    /// 使用者問「這週有哪些工單有延遲風險」，想知道的顯然包含它們。
+    /// MRP 那側（MrpCalculationService）本來就是這樣處理的，這裡跟它對齊。
+    private (DateOnly Start, DateOnly End) ResolveRange(DateOnly? from, DateOnly? to, int? windowDays)
     {
+        if (windowDays is <= 0 or > MaxWindowDays)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(windowDays), windowDays, $"視窗天數必須介於 1 到 {MaxWindowDays} 天");
+        }
+
         if (from.HasValue && to.HasValue)
         {
             if (to.Value < from.Value)
@@ -109,9 +132,26 @@ public sealed class WorkOrderRiskService(
         }
 
         var today = clock.Today;
+
+        // 今天算第一天，所以 N 天的視窗是 today ~ today+(N-1)
+        var end = to ?? (windowDays.HasValue
+            ? today.AddDays(windowDays.Value - 1)
+            : EndOfThisWeek(today));
+
+        var start = from ?? DateOnly.MinValue;
+
+        if (end < start)
+        {
+            throw new ArgumentException("結束日期不可早於開始日期", nameof(to));
+        }
+
+        return (start, end);
+    }
+
+    private static DateOnly EndOfThisWeek(DateOnly today)
+    {
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
-        var monday = today.AddDays(-daysFromMonday);
-        return (from ?? monday, to ?? monday.AddDays(6));
+        return today.AddDays(-daysFromMonday).AddDays(DefaultWindowDays - 1);
     }
 
     private static string Format(decimal qty) => qty == decimal.Truncate(qty)
