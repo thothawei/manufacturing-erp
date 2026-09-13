@@ -11,7 +11,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-292 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 322；
+317 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 347；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -159,6 +159,44 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
 
+### 角色範圍
+
+可選的 `role` 參數會限制這次請求用得到哪些工具：
+
+```bash
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"面板的採購單狀況？","role":"quality"}'
+```
+
+| 工具 | production 生管 | purchasing 採購 | quality 品保 |
+|---|:---:|:---:|:---:|
+| `search_items`／`get_item_inventory_status`／`search_documents` | ✓ | ✓ | ✓ |
+| `check_material_sufficiency_for_item` | ✓ | ✓ | |
+| `get_work_order_progress` | ✓ | | ✓ |
+| `list_work_orders_at_risk` | ✓ | ✓ | |
+| `run_mrp_shortage_analysis`／`run_mrp_time_phased_analysis` | ✓ | ✓ | |
+| `list_open_purchase_orders` | | ✓ | |
+| `get_quality_inspection_summary` | ✓ | | ✓ |
+
+不給 `role` 就是全部工具都開（維持加這一層之前的行為）。
+不認得的角色名稱回 400 —— 打錯字的 `purchase` 靜默變成「全部工具都開」，
+比直接報錯危險得多。
+
+**兩道防線，缺一不可**：送給 LLM 的工具清單會過濾，**而且**執行時再擋一次。
+只做前者不夠 —— 工具名稱是模型生成的字串，它可以叫出一個從沒出現在自己清單裡的名字
+（猜錯就會發生，不需要任何惡意），那時只剩執行時這道擋得住。
+反向驗證：拿掉執行層那道會紅 2 條。
+
+**對話記憶也以角色為界**：記憶的鍵是「角色 + 識別碼」。共用一個鍵的話，
+拿著品保的識別碼改用採購角色再問一次，就讀得到品保那一段歷史 ——
+工具過濾擋住的東西會從歷史繞回來。反向驗證：把鍵改回只有識別碼會紅 1 條。
+
+**這一層是什麼、不是什麼**：它是工具層級的邊界，不是資料列層級的隔離
+（允許的工具仍然查得到全庫資料），也不是認證（`role` 由呼叫端自己填，
+這個系統沒有登入）。它擋得住一件具體的事：agentic 系統把全部能力
+一視同仁地攤開給每個呼叫者 —— 品保問得到供應商的交易條件，
+不需要任何越權技巧，只要問一句就行。
+
 ### 對話記憶
 
 回應會帶一個 `conversationId`，下次請求帶著它就能接續同一段對話：
@@ -253,6 +291,7 @@ dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~Anthropi
 | `INVALID_ARGUMENT` | 參數缺漏或格式不對 | 依 message 修正後可重試一次 |
 | `NOT_APPLICABLE` | 參數合法但問法不適用（如對原物料問可製造量） | 說明原因，不要重試 |
 | `SERVICE_UNAVAILABLE` | 依賴的外部服務沒跑（RAG 需要的 Ollama） | 說明原因並建議改用結構化查詢，不要重試 |
+| `NOT_AUTHORIZED` | 工具存在，但這個角色沒有權限 | 如實說明不在查詢範圍內，不要重試、也不要繞過 |
 | `UNKNOWN_TOOL` / `INTERNAL_ERROR` | 呼叫了不存在的工具／未預期錯誤 | 不要重試 |
 
 未預期例外一律降級成單一工具的失敗，不會讓整段對話回 500；
@@ -507,14 +546,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-292 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 322 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+317 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 347 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 62 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 197（+30 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
-| `Erp.Api.Tests` | 22 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Infrastructure.Tests` | 220（+30 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Api.Tests` | 24 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
 幾個值得一提的：
@@ -678,8 +717,12 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120
 - **評測集是 30 組手寫標註**（21 有答案 + 4 邊界 + 5 無關），不是業界標準評測集。
   它有 MRR 與 Recall@3 兩個指標當迴歸基準（見「檢索品質怎麼量」），
   比原本的 8 組有解析度得多，但題目仍然是自己出的 —— 出題的人和寫語料的是同一個。
-- **AI 助理沒有使用者權限隔離**：唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
-  注入呼叫者身分並下推到查詢服務。
+- **角色隔離只到工具層級，沒有資料列層級的隔離**：允許的工具仍然查得到全庫資料，
+  沒有「只能看自己部門的工單」這件事。要做到那個量級，得在每個查詢服務裡下推
+  呼叫者身分並過濾資料列。
+- **角色不是認證**：`role` 是呼叫端自己填的，這個系統沒有身分驗證，
+  填 `production` 和填別的沒有任何門檻。它擋得住「工具清單被一視同仁地攤開給每個人」，
+  擋不住刻意越權的人。要補的是前面那一段（登入與身分），不是這一層。
 
 ## SQLite 的 decimal
 

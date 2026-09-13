@@ -51,8 +51,20 @@ public sealed class ToolDispatcher(
     };
 
     public async Task<ToolExecutionResult> ExecuteAsync(
-        string toolName, JsonElement arguments, CancellationToken ct = default)
+        string toolName, JsonElement arguments, string? role = null, CancellationToken ct = default)
     {
+        // 執行時的第二道檢查。不能只靠「沒把這個工具放進送給 LLM 的清單」——
+        // 工具名是模型生成的字串，它可以叫出一個從沒出現在清單裡的名字。
+        // 少了這一層，那個呼叫會照常執行。
+        if (!AssistantScope.IsAllowed(role, toolName))
+        {
+            logger.LogWarning(
+                "角色 {Role} 嘗試呼叫未授權的工具 {ToolName}", role, toolName);
+
+            return Error(ToolErrorCode.NotAuthorized,
+                $"目前的角色（{role}）沒有使用 {toolName} 的權限，請改用其他方式查詢或聯絡管理者。");
+        }
+
         // 每次工具呼叫都留一筆結構化紀錄：問了什麼、花多久、成不成功。
         // 這條 log 是 AI 助理唯一的稽核軌跡 —— 沒有它就只能看到最後那段自然語言，
         // 無從得知答案是根據哪些查詢組出來的。

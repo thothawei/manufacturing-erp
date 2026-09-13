@@ -11,5 +11,8 @@ public sealed record AiAnswer(string Answer, string ConversationId);
 public interface IAiAssistantService
 {
     /// conversationId 為 null（或找不到）時開始一段新對話。
-    Task<AiAnswer> AskAsync(string question, string? conversationId = null, CancellationToken ct = default);
+    /// role 為 null 時不限角色；不認得的角色名稱會擲 ArgumentException。
+    Task<AiAnswer> AskAsync(
+        string question, string? conversationId = null, string? role = null,
+        CancellationToken ct = default);
 }

@@ -79,6 +79,29 @@ public class ErrorMappingTests(ErpApiFactory factory) : IClassFixture<ErpApiFact
     }
 
     [Fact]
+    public async Task 未知的角色回400()
+    {
+        // 打錯字的角色名如果靜默變成「全部工具都開」，那一層就等於不存在
+        var response = await Client.PostAsJsonAsync(
+            "/api/ai-assistant/ask", new { question = "測試", role = "purchase" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("purchase", problem.GetProperty("detail").GetString()!);
+    }
+
+    [Fact]
+    public async Task 合法的角色會走到後面的流程()
+    {
+        // 測試環境的 AI 端點連不上，所以 503 正是「角色檢查放行了」的證據
+        var response = await Client.PostAsJsonAsync(
+            "/api/ai-assistant/ask", new { question = "測試", role = "purchasing" });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
     public async Task AI服務無法連線回503()
     {
         var response = await Client.PostAsJsonAsync("/api/ai-assistant/ask", new { question = "測試" });

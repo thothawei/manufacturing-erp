@@ -19,12 +19,17 @@ public sealed class AiAssistantService(
     private readonly AiAssistantOptions _options = options.Value;
 
     public async Task<AiAnswer> AskAsync(
-        string question, string? conversationId = null, CancellationToken ct = default)
+        string question, string? conversationId = null, string? role = null,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(question))
         {
             throw new ArgumentException("問題不可為空", nameof(question));
         }
+
+        // 先擋下不認得的角色再做任何事：打錯字的角色名如果靜默變成「不限角色」，
+        // 這一層就等於不存在
+        AssistantScope.EnsureKnown(role);
 
         var trimmedQuestion = question.Trim();
 
@@ -36,7 +41,12 @@ public sealed class AiAssistantService(
 
         var messages = new List<LlmMessage>();
 
-        foreach (var turn in conversationStore.GetRecentTurns(id))
+        // 對話記憶以「角色 + 識別碼」為鍵。共用一個鍵的話，
+        // 拿著品保的識別碼改用採購角色再問一次，就讀得到品保那一段歷史 ——
+        // 工具過濾擋住的東西會從歷史繞回來。
+        var storeKey = $"{role ?? "-"}:{id}";
+
+        foreach (var turn in conversationStore.GetRecentTurns(storeKey))
         {
             messages.Add(LlmMessage.User(turn.Question));
             messages.Add(new LlmMessage(LlmRole.Assistant, [new LlmTextBlock(turn.Answer)]));
@@ -50,12 +60,12 @@ public sealed class AiAssistantService(
             // 直接傳參考的話，任何暫存請求的實作（重試、記錄、批次）
             // 事後讀到的都會是被改過的內容
             var response = await llmClient.SendAsync(
-                new LlmRequest(AiSystemPrompt.Text, [.. messages], ToolCatalog.All), ct);
+                new LlmRequest(AiSystemPrompt.Text, [.. messages], AssistantScope.ToolsFor(role)), ct);
 
             if (!response.RequiresToolExecution)
             {
                 // 只有問答文字進歷史，工具往返不進 —— 理由寫在 ConversationTurn 上
-                conversationStore.Append(id, new ConversationTurn(trimmedQuestion, response.Text));
+                conversationStore.Append(storeKey, new ConversationTurn(trimmedQuestion, response.Text));
                 return new AiAnswer(response.Text, id);
             }
 
@@ -64,7 +74,8 @@ public sealed class AiAssistantService(
             var toolResults = new List<LlmContentBlock>();
             foreach (var toolUse in response.ToolUses)
             {
-                var result = await toolDispatcher.ExecuteAsync(toolUse.ToolName, toolUse.Arguments, ct);
+                var result = await toolDispatcher.ExecuteAsync(
+                    toolUse.ToolName, toolUse.Arguments, role, ct);
 
                 logger.LogInformation(
                     "第 {Iteration} 輪呼叫工具 {ToolName}，是否錯誤：{IsError}",

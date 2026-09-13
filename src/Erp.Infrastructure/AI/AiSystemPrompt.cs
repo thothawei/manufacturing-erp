@@ -18,6 +18,8 @@ public static class AiSystemPrompt
            - ENTITY_NOT_FOUND：資料不存在，直接告訴使用者查不到，不要重試。
            - INVALID_ARGUMENT：參數有誤，依 message 修正後可以重試一次。
            - NOT_APPLICABLE：這個問法對這筆資料不適用，向使用者說明原因，不要重試。
+           - NOT_AUTHORIZED：目前的角色沒有這個工具的權限。如實告訴使用者這項資料
+             不在他的查詢範圍內，不要重試、也不要改用別的工具繞過去。
            - UNKNOWN_TOOL、INTERNAL_ERROR：不要重試，告訴使用者這項查詢目前無法完成。
            - SERVICE_UNAVAILABLE：這項功能依賴的服務沒有啟動，不要重試。
              照 message 說明原因，並建議使用者改用結構化查詢（庫存、工單、採購、品管數字）。

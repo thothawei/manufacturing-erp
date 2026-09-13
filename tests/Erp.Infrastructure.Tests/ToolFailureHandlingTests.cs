@@ -114,7 +114,7 @@ public class ToolFailureHandlingTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            dispatcher.ExecuteAsync(ToolCatalog.SearchItems, Args(new { keyword = "面板" }), cts.Token));
+            dispatcher.ExecuteAsync(ToolCatalog.SearchItems, Args(new { keyword = "面板" }), role: null, cts.Token));
 
         await fixture.DisposeAsync();
     }

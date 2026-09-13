@@ -17,6 +17,7 @@ public class SystemPromptTests
     [InlineData("NOT_APPLICABLE", "問法不適用的錯誤碼處理")]
     [InlineData("INTERNAL_ERROR", "系統錯誤的錯誤碼處理")]
     [InlineData("SERVICE_UNAVAILABLE", "外部服務不可用的錯誤碼處理")]
+    [InlineData("NOT_AUTHORIZED", "角色沒有權限的錯誤碼處理")]
     [InlineData("search_documents", "文件語意檢索的使用時機")]
     [InlineData("available_qty", "可用庫存優先於帳上庫存")]
     [InlineData("search_items", "多筆結果要請使用者確認")]

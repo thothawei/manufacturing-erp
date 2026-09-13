@@ -82,7 +82,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 292 個測試（本機有 Ollama 時 322）
+dotnet test                          # 317 個測試（本機有 Ollama 時 347）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
@@ -610,8 +610,9 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
   沒有文件上傳端點 —— 那會帶出權限、病毒掃描、檔案儲存一整串與本模組無關的問題。
 - **相似度門檻 0.5 是對「`bge-m3` + 這個語料」量出來的值，不是通用常數。**
   換 embedding 模型後必須重新量。
-- **沒有使用者權限隔離**：AI 唯讀，但查得到全庫資料。擴充方式是在 `ToolDispatcher`
-  注入呼叫者身分並下推到查詢服務。
+- **角色隔離只到工具層級**：允許的工具仍然查得到全庫資料，也沒有身分驗證 ——
+  `role` 是呼叫端自己填的。它擋得住「工具清單一視同仁地攤開給每個人」，
+  擋不住刻意越權的人。
 - **MRP 沒有時間分桶**：同一料號的需求日取最早的那張工單，建議採購會偏保守。
 - **BOM 展開是逐階查詢**，深層 BOM 會放大成本。正解是遞迴 CTE，目前資料量下不構成問題。
 

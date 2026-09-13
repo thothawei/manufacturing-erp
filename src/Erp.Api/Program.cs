@@ -124,8 +124,10 @@ app.MapPost("/api/ai-assistant/ask", async (
             return Results.BadRequest(new { error = "conversationId 必須是先前回應中回傳的識別碼" });
         }
 
-        // LlmUnavailableException 由 ErpExceptionHandler 統一對映成 503
-        var result = await assistant.AskAsync(request.Question, request.ConversationId, ct);
+        // 未知角色會擲 ArgumentException，由 ErpExceptionHandler 對映成 400
+        // LlmUnavailableException 同樣由它對映成 503
+        var result = await assistant.AskAsync(
+            request.Question, request.ConversationId, request.Role, ct);
         return Results.Ok(new { answer = result.Answer, conversationId = result.ConversationId });
     })
     .WithSummary("AI 助理問答")
@@ -134,6 +136,9 @@ app.MapPost("/api/ai-assistant/ask", async (
         "一次請求內部會有多輪 LLM 與工具的往返（上限 5 輪）。" +
         "回應會帶一個 conversationId，下次請求帶著它就能接續同一段對話（記憶最近 6 輪問答，" +
         "存在記憶體、閒置 60 分鐘後丟棄，服務重啟即消失）。不帶或帶一個已失效的識別碼都會開始新對話。" +
+        "可選的 role 參數會限制這次請求用得到哪些工具（production 生管／purchasing 採購／" +
+        "quality 品保），不給則不限。這是工具層級的邊界，不是資料列層級的隔離 —— " +
+        "允許的工具查得到全庫資料。不同角色的對話歷史互相隔離。" +
         "需要設定 Anthropic API 金鑰，未設定時回 503。");
 
 // 以下端點目前是給人驗證資料層用的；Phase 2 的 AI 助理會改用同一批 Application 服務
@@ -214,7 +219,7 @@ app.Run();
 // 讓整合測試能參考這個 Program 類別
 public partial class Program;
 
-public sealed record AskRequest(string Question, string? ConversationId = null);
+public sealed record AskRequest(string Question, string? ConversationId = null, string? Role = null);
 
 public partial class Program
 {

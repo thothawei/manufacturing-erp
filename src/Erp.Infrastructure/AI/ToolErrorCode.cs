@@ -22,6 +22,12 @@ public enum ToolErrorCode
     /// 未預期的系統錯誤。重試沒有意義
     InternalError,
 
+    /// 這個角色不能使用這個工具。
+    ///
+    /// 與 UnknownTool 分開：工具存在，是呼叫者沒有權限。
+    /// 合併的話，LLM 會以為是自己拼錯工具名而重試，而重試永遠不會成功。
+    NotAuthorized,
+
     /// 工具依賴的外部服務不可用（例如文件檢索需要的本機 Ollama 沒有啟動）。
     ///
     /// 與 InternalError 分開是有意義的：這不是程式壞了，而是環境少裝了一個可選元件。
@@ -40,6 +46,7 @@ public static class ToolErrorCodeExtensions
         ToolErrorCode.InvalidArgument => "INVALID_ARGUMENT",
         ToolErrorCode.NotApplicable => "NOT_APPLICABLE",
         ToolErrorCode.UnknownTool => "UNKNOWN_TOOL",
+        ToolErrorCode.NotAuthorized => "NOT_AUTHORIZED",
         ToolErrorCode.InternalError => "INTERNAL_ERROR",
         ToolErrorCode.ServiceUnavailable => "SERVICE_UNAVAILABLE",
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "未定義的錯誤碼")
