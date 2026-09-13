@@ -99,7 +99,7 @@ public class SeededScenarioTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MRP試算_面板淨缺一百三十片且建議下單一百五十片()
+    public async Task MRP試算_面板淨缺一百二十片且建議下單一百五十片()
     {
         var db = _fixture.CreateContext();
         var service = new MrpCalculationService(
@@ -109,10 +109,13 @@ public class SeededScenarioTests : IAsyncLifetime
         var result = await service.RunShortageAnalysisAsync();
 
         var panel = result.ShortageItems.Single(s => s.ItemCode == "PANEL-01");
-        Assert.Equal(210m, panel.GrossRequirementQty);  // 100 台 TV ×2 + 10 台 MON ×1
+        // 100 台 TV ×2。逾期那張 MON-200 工單雖然未結案，但它已全數發料 ——
+        // 那 10 片面板早就出庫了，再算一次就是同一份需求被算兩次
+        Assert.Equal(200m, panel.GrossRequirementQty);
         Assert.Equal(80m, panel.AvailableQty);
+        Assert.Equal(new DateOnly(2026, 9, 13), panel.NeededByDate);  // 最急的是 WO-01 的交期
         Assert.Equal(0m, panel.InTransitQty);            // 已下單的 30 片 10 天後才到，趕不上
-        Assert.Equal(130m, panel.NetShortageQty);
+        Assert.Equal(120m, panel.NetShortageQty);
         Assert.Equal(150m, panel.SuggestedOrderQty);     // 訂購倍量 50 → 無條件進位
         Assert.Equal("SUP-008", panel.SupplierCode);
         Assert.Equal(5, panel.LeadTimeDays);
@@ -129,7 +132,7 @@ public class SeededScenarioTests : IAsyncLifetime
         var result = await service.RunShortageAnalysisAsync();
 
         Assert.DoesNotContain(result.ShortageItems, s => s.ItemCode == "SCREW-05");  // 需 1200 支、有 6000 支
-        Assert.DoesNotContain(result.ShortageItems, s => s.ItemCode == "CABLE-07");  // 需 120 條、有 500 條
+        Assert.DoesNotContain(result.ShortageItems, s => s.ItemCode == "CABLE-07");  // 需 100 條、有 500 條
         Assert.Equal("PANEL-01", Assert.Single(result.ShortageItems).ItemCode);
     }
 

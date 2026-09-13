@@ -16,7 +16,8 @@ namespace Erp.Infrastructure.Persistence;
 ///
 ///   WO-xxx-01（TV-100 100 台，3 天後到期）→ 面板可用 80 片、需要 200 片
 ///       → 缺 120 片，補料前置期 5 天但只剩 3 天 → 延遲 2 天
-///   MRP 全域試算 → 面板淨缺 130 片，訂購倍量 50 → 建議下單 150 片
+///   MRP 全域試算 → 面板淨缺 120 片，訂購倍量 50 → 建議下單 150 片
+///       （WO-xxx-02 雖然逾期未結案，但已全數發料 → 料已出庫，不重複計入需求）
 ///
 /// 這正是 docs/ai-assistant-module-plan-v2.md 第 5 節範例 2 的情境。
 public static class ErpDbSeeder

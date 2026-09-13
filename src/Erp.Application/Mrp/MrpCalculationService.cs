@@ -23,12 +23,15 @@ public sealed record ShortageAnalysisResult(
     DateOnly HorizonEnd,
     IReadOnlyList<ShortageItem> ShortageItems);
 
-/// MRP 缺料試算：把規劃期間內所有未結案工單的剩餘產量展開成原料需求，
+/// MRP 缺料試算：把規劃期間內未結案、且**尚未全數發料**的工單剩餘產量展開成原料需求，
 /// 扣掉可用庫存與能及時到貨的在途採購，剩下的就是要補的量。
 ///
-/// 假設（要說得出理由）：工單的物料需求尚未反映在 InventoryBalance.ReservedQty 上。
-/// 若工單已實際發料，本算法會高估需求量——方向偏保守（寧可多買也不缺料），
-/// 但正式版本應改為「只計算尚未保留的部分」。
+/// 「尚未全數發料」這個條件是必要的，不是保守起見：料一旦發到現場就已經從帳上庫存扣掉了，
+/// 再把同一張工單的剩餘產量算成毛需求，等於同一份需求被算兩次，缺料量會憑空變大。
+///
+/// InventoryBalance.ReservedQty 在這裡刻意不參與需求面的計算 ——
+/// 它只透過 AvailableQty（帳上減保留）影響供給面。工單需求是在這裡從未結案工單
+/// 動態展開的，不依賴任何人回頭去維護 ReservedQty 欄位。
 public sealed class MrpCalculationService(
     IWorkOrderRepository workOrderRepository,
     IItemRepository itemRepository,
@@ -61,6 +64,13 @@ public sealed class MrpCalculationService(
 
         foreach (var wo in workOrders)
         {
+            if (wo.MaterialsFullyIssued)
+            {
+                // 料已經發到現場、帳上庫存也已經扣過了。再算一次毛需求就是重複計算：
+                // 這張工單要的料不會再從倉庫出去第二次。
+                continue;
+            }
+
             var steps = await workOrderRepository.GetRoutingStepsAsync(wo.WorkOrderNo, ct);
             var remainingQty = WorkOrderRemainingQty.Calculate(wo, steps);
             if (remainingQty <= 0)

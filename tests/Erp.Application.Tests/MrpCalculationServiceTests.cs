@@ -42,6 +42,46 @@ public class MrpCalculationServiceTests
         };
 
     [Fact]
+    public async Task 已全數發料的工單不再計入毛需求()
+    {
+        // 同一張工單的料已經發到現場、帳上庫存也扣過了。
+        // 再把它的剩餘產量算成毛需求，等於同一份需求被算兩次，缺料量會憑空變大。
+        var service = CreateService(
+            [new WorkOrder
+            {
+                WorkOrderNo = "WO-ISSUED", ItemCode = "TV-100", PlannedQty = 100m,
+                DueDate = new DateOnly(2026, 9, 13), Status = WorkOrderStatus.Released,
+                MaterialIssueStatus = MaterialIssueStatuses.FullyIssued
+            }],
+            [TestData.Balance("PANEL-01", 50m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var result = await service.RunShortageAnalysisAsync();
+
+        Assert.Empty(result.ShortageItems);
+    }
+
+    [Fact]
+    public async Task 部分發料的工單仍然計入毛需求()
+    {
+        // 只有「已全數發料」代表這張工單不會再來領料。
+        // 部分發料還會再領，需求照算 —— 否則會少買。
+        var service = CreateService(
+            [new WorkOrder
+            {
+                WorkOrderNo = "WO-PARTIAL", ItemCode = "TV-100", PlannedQty = 100m,
+                DueDate = new DateOnly(2026, 9, 13), Status = WorkOrderStatus.Released,
+                MaterialIssueStatus = MaterialIssueStatuses.PartiallyIssued
+            }],
+            [TestData.Balance("PANEL-01", 50m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var result = await service.RunShortageAnalysisAsync();
+
+        var panel = result.ShortageItems.Single(s => s.ItemCode == "PANEL-01");
+        Assert.Equal(200m, panel.GrossRequirementQty);
+        Assert.Equal(150m, panel.NetShortageQty);
+    }
+
+    [Fact]
     public async Task 淨缺料量等於毛需求扣掉可用庫存與在途量()
     {
         // 100 台 TV-100 需要 200 片面板；可用 50 片、在途 30 片 → 淨缺 120 片

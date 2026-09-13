@@ -11,7 +11,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-255 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 264；
+263 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 272；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -117,13 +117,14 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | `PurchasingQueryService` | 未結案採購單查詢 |
 | `QualityInspectionQueryService` | 品管檢驗結果彙總 |
 
-## 三個必須知道的計算約定
+## 四個必須知道的計算約定
 
-這三條寫死在程式碼與測試裡，改動前先看 [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md)：
+這四條寫死在程式碼與測試裡，改動前先看 [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md)：
 
 1. **可行性計算一律以 `AvailableQty`（帳上 − 已保留）為基準**，不使用帳上庫存。用帳上庫存會把別張工單保留的料重複計入，導致「系統說夠、現場缺料」。
 2. **`RequiredPerFinishedUnit` 的分母是最終成品一個單位**，多階 BOM 的中間階用量會逐層累乘。例如 `TV-100 → CHASSIS-02 ×3 → SCREW-05 ×4`，螺絲對成品的用量是 12 而不是 4。
 3. **BOM 展開一律展到葉節點原料，不動用半成品既有庫存。** 這會低估可製造量但不會高估，對交期判斷是安全方向。
+4. **MRP 的毛需求只算「尚未全數發料」的未結案工單。** 料一旦發到現場就已經從帳上庫存扣掉了，再把那張工單的剩餘產量算成需求，等於同一份料被算兩次 —— 展示資料裡就有一張這樣的工單，曾讓面板淨缺從 120 片被灌水成 130 片。
 
 ## AI 助理
 
@@ -450,13 +451,13 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-255 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 264 個：
+263 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 272 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 43 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 183（+9 需 Ollama） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Application.Tests` | 51 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 183（+9 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
@@ -579,7 +580,7 @@ TV-100  ├── PANEL-01   × 2
 ```bash
 curl "http://localhost:5199/api/items/TV-100/sufficiency"    # 最多做 40 台（用帳上庫存會誤算成 50 台）
 curl "http://localhost:5199/api/work-orders/at-risk"          # 兩張風險工單，各延遲 2 天
-curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130 片，建議下單 150 片
+curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120 片，建議下單 150 片
 ```
 
 這些數字都被 `SeededScenarioTests` 釘住，改動種子資料而沒同步更新文件時測試會先紅。
@@ -588,7 +589,6 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 130
 
 - **MRP 沒有時間分桶（time-phasing）**：同一料號的需求日一律取最早的那張工單，
   若最急的是一張小需求，整批需求都會被貼上該日期，建議採購會偏保守。
-- **MRP 假設工單需求尚未反映在 `ReservedQty`**；工單若已實際發料會高估需求量（方向偏保守）。
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）

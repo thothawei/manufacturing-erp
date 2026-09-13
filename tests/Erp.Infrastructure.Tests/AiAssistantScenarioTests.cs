@@ -83,7 +83,7 @@ public class AiAssistantScenarioTests : IAsyncLifetime
         var mrp = ToolResultOf(llm, 2);
         var panel = mrp.GetProperty("shortage_items").EnumerateArray()
             .Single(s => s.GetProperty("item_code").GetString() == "PANEL-01");
-        Assert.Equal(130, panel.GetProperty("net_shortage_qty").GetInt32());
+        Assert.Equal(120, panel.GetProperty("net_shortage_qty").GetInt32());
         Assert.Equal(150, panel.GetProperty("suggested_order_qty").GetInt32());
         Assert.Equal("SUP-008", panel.GetProperty("supplier_code").GetString());
         Assert.Equal(5, panel.GetProperty("lead_time_days").GetInt32());

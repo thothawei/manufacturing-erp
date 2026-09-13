@@ -82,7 +82,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 255 個測試（本機有 Ollama 時 264）
+dotnet test                          # 263 個測試（本機有 Ollama 時 272）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
@@ -182,18 +182,20 @@ curl "http://localhost:5199/api/mrp/shortages"
 
 ```json
 {"basis":"available","horizonStart":"2026-09-10","horizonEnd":"2026-10-10",
- "shortageItems":[{"itemCode":"PANEL-01","itemName":"面板","grossRequirementQty":210,
-   "availableQty":80,"inTransitQty":0,"netShortageQty":130,"neededByDate":"2026-09-08",
+ "shortageItems":[{"itemCode":"PANEL-01","itemName":"面板","grossRequirementQty":200,
+   "availableQty":80,"inTransitQty":0,"netShortageQty":120,"neededByDate":"2026-09-13",
    "suggestedOrderQty":150,"supplierCode":"SUP-008","leadTimeDays":5}]}
 ```
 
 **三個看點**：
 
-- `grossRequirementQty` 是 210 而不是 200 —— **已逾期未結案的工單也要料**。
-  這是實作時測試抓到的 bug：原本查詢起點用「今天」，把逾期工單整批漏掉了。
+- `grossRequirementQty` 是 200 —— 只有 WO-01 那 100 台 TV 的面板需求。
+  **已逾期未結案的工單一樣要料**（查詢起點不是「今天」，這是實作時測試抓到的一個 bug），
+  但這裡那張逾期的 MON-200 工單已經「已全數發料」：料早就出庫、帳上庫存也扣過了，
+  再把它的剩餘產量算成需求就是同一份料算兩次。曾經有一版是這樣，缺料量被灌水成 130。
 - `inTransitQty` 是 0，但其實有一張 30 片的採購單在途 —— 它 10 天後才到，
-  趕不上 9/08 的需求日，所以不能算成供給。
-- `suggestedOrderQty` 是 150 而不是 130 —— 套用了訂購倍量 50。
+  趕不上 9/13 的需求日，所以不能算成供給。
+- `suggestedOrderQty` 是 150 而不是 120 —— 套用了訂購倍量 50。
   這個數字要直接引用，system prompt 明文禁止 LLM 自己從缺料量推算。
 
 ### 3.5 品管：後端先彙總，不讓 LLM 加總

@@ -122,8 +122,10 @@ public static class ToolCatalog
         new ToolDefinition(
             RunMrpShortageAnalysis,
             """
-            MRP 缺料試算：把規劃期間內所有未結案工單的剩餘產量展開成原料需求，
+            MRP 缺料試算：把規劃期間內未結案工單的剩餘產量展開成原料需求，
             扣掉可用庫存與能及時到貨的在途採購，算出還要補多少。已逾期未結案的工單也會納入。
+            已全數發料的工單不列入需求 —— 那些料已經出庫、反映在帳上庫存的減少裡了，
+            再算一次會讓缺料量偏高。
             回傳每個缺料料號的 gross_requirement_qty（毛需求）、available_qty（可用庫存）、
             in_transit_qty（能及時到貨的在途量）、net_shortage_qty（淨缺料量）、
             needed_by_date（需求日期）、suggested_order_qty（建議採購量，已套用最小訂購量與訂購倍量）、
