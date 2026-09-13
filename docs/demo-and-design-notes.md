@@ -82,13 +82,13 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 291 個測試（本機有 Ollama 時 300）
+dotnet test                          # 292 個測試（本機有 Ollama 時 322）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
 
 三者都由 GitHub Actions 在每次 push 與 PR 上執行（Release 組態），
-另有一個 `retrieval-quality` job 裝 Ollama 跑那 9 個檢索品質測試。
+另有一個 `retrieval-quality` job 裝 Ollama 跑那 30 個檢索品質測試。
 格式規範是 C# 4 空格、專案檔與 JSON/YAML 2 空格、統一 LF 換行；
 Markdown 不砍行尾空白（那是換行語法），EF 產生的 migration 標記為 generated code 不套用規範。
 
@@ -499,7 +499,9 @@ REST 端點卻完全裸奔 —— 查無料號回 500 並吐出堆疊。現在�
 CI 上會真的跑它（獨立的 `retrieval-quality` job，裝 Ollama 並 pull 模型），
 並用 `RAG_REQUIRE_OLLAMA=1` 讓它不准 skip —— 少了那個開關，環境沒裝起來時
 整組會變成 skip 而 job 照樣綠，那是一條假防線。
-誠實的邊界：標註的問答對只有 8 組，擋得住「換到不可用的模型」，擋不住細微的品質下滑。
+誠實的邊界：評測集是 30 組手寫標註，出題的人和寫語料的是同一個。
+它有 MRR（0.92）與 Recall@3（1.00）當迴歸基準，比原本的 8 組有解析度得多，
+但擋不住「題目本身就出得不夠刁鑽」這件事。
 
 ### Q：為什麼 `search_documents` 不像其他八個工具一樣轉呼叫 Application Service？
 
@@ -600,7 +602,9 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
   這是目前唯一「編譯過、測試過、沒真的跑過」的環節。
   （RAG 那一側原本也在這份清單上，裝了 Ollama 實跑後關閉了 —— 而那一輪實測換掉了
   預設的 embedding 模型，見第 4 節最後一題。）
-- **RAG 檢索品質的標註問答對只有 8 組**，不是正式的評測集。
+- **RAG 的相似度門檻擋不住「主題沾得上邊、但語料沒寫」的問題**（售價、付款條件、
+  賠償金額實測 0.55–0.63，與真正相關題目的區間重疊）。防線在 system prompt 而不是門檻。
+- **RAG 檢索品質的評測集是 30 組手寫標註**，不是業界標準評測集。
   `RetrievalQualityTests`（9 個）在 CI 上會真的跑（獨立 job），本機沒有 Ollama 時 skip。
 - **RAG 索引不會自動更新**：語料是編譯進程式的常數，改了要刪掉資料庫重建。
   沒有文件上傳端點 —— 那會帶出權限、病毒掃描、檔案儲存一整串與本模組無關的問題。
