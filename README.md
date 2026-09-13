@@ -21,6 +21,7 @@ RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那�
 
 | 想看什麼 | 去哪裡 |
 |---|---|
+| 一頁式重點（趕時間的話看這份） | [`docs/one-pager.md`](docs/one-pager.md) |
 | 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
