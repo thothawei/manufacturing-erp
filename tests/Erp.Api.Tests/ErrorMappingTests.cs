@@ -53,6 +53,32 @@ public class ErrorMappingTests(ErpApiFactory factory) : IClassFixture<ErpApiFact
     }
 
     [Fact]
+    public async Task 亂編的conversationId回400()
+    {
+        // 只接受伺服器自己發過的 GUID。放行任意字串的話，
+        // 猜一個別人用過的 id 就能讀到別人的對話歷史。
+        var response = await Client.PostAsJsonAsync(
+            "/api/ai-assistant/ask", new { question = "測試", conversationId = "隔壁部門的對話" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("conversationId", body.GetProperty("error").GetString()!);
+    }
+
+    [Fact]
+    public async Task 合法的conversationId會走到後面的流程()
+    {
+        // 這個測試環境的 AI 端點連不上（BaseUrl 指向沒有服務在聽的埠），
+        // 所以 503 正是「格式檢查放行了、真的去呼叫 LLM 了」的證據
+        var response = await Client.PostAsJsonAsync(
+            "/api/ai-assistant/ask",
+            new { question = "測試", conversationId = Guid.NewGuid().ToString() });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
     public async Task AI服務無法連線回503()
     {
         var response = await Client.PostAsJsonAsync("/api/ai-assistant/ask", new { question = "測試" });

@@ -50,6 +50,11 @@ internal static class TestServices
             logger ?? NullLogger<ToolDispatcher>.Instance);
     }
 
+    /// 測試預設用一個乾淨的對話記憶。多輪對話測試會自己傳一個共用的進去 ——
+    /// 每次呼叫都建新的話，就永遠測不到「上一輪記住了什麼」。
+    public static IConversationStore CreateConversationStore(int maxTurns = 6)
+        => new InMemoryConversationStore(maxTurns, maxConversations: 200, idleTimeout: TimeSpan.FromMinutes(60));
+
     public static DocumentSearchService CreateSearchService(
         SqliteTestDatabase fixture,
         IEmbeddingClient embeddingClient,

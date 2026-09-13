@@ -135,10 +135,10 @@ public class ToolFailureHandlingTests
             FakeLlmClient.Text("面板可用 80 片；那張工單查不到。"));
 
         var service = new AiAssistantService(
-            llm, dispatcher, Options.Create(new AiAssistantOptions()),
+            llm, dispatcher, TestServices.CreateConversationStore(), Options.Create(new AiAssistantOptions()),
             NullLogger<AiAssistantService>.Instance);
 
-        var answer = await service.AskAsync("面板庫存跟 NOT-EXIST 的進度");
+        var answer = (await service.AskAsync("面板庫存跟 NOT-EXIST 的進度")).Answer;
 
         var results = llm.ReceivedRequests[1].Messages[^1].Content.Cast<LlmToolResultBlock>().ToList();
         Assert.Equal(2, results.Count);

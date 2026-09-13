@@ -63,7 +63,7 @@ public class AnthropicLiveApiTests : IAsyncLifetime
         var recorder = new RecordingLlmClient(new AnthropicLlmClient(options));
 
         return (new AiAssistantService(
-            recorder, _dispatcher, options, NullLogger<AiAssistantService>.Instance), recorder);
+            recorder, _dispatcher, TestServices.CreateConversationStore(), options, NullLogger<AiAssistantService>.Instance), recorder);
     }
 
     [AnthropicLiveFact]
@@ -72,7 +72,7 @@ public class AnthropicLiveApiTests : IAsyncLifetime
         const string question = "TV-100 用現有庫存最多可以做幾台？另外這週有哪些工單有延遲風險？";
 
         var (service, recorder) = CreateService();
-        var answer = await service.AskAsync(question);
+        var answer = (await service.AskAsync(question)).Answer;
 
         var toolNames = recorder.ToolUses.Select(t => t.ToolName).ToList();
 
@@ -96,7 +96,7 @@ public class AnthropicLiveApiTests : IAsyncLifetime
         const string question = "TV-999 這個料號現在庫存多少？";
 
         var (service, recorder) = CreateService();
-        var answer = await service.AskAsync(question);
+        var answer = (await service.AskAsync(question)).Answer;
 
         // 必須是「查過才說沒有」，不是憑印象直接回答
         Assert.NotEmpty(recorder.ToolUses);

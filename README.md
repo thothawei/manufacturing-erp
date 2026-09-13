@@ -11,7 +11,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十一個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-277 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 286；
+291 個測試，0 警告（本機裝了 Ollama 時多跑 9 個檢索品質測試，共 300；
 另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
@@ -158,6 +158,28 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 ```
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
+
+### 對話記憶
+
+回應會帶一個 `conversationId`，下次請求帶著它就能接續同一段對話：
+
+```bash
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"那 CABLE-07 呢？","conversationId":"<上一次回應裡的識別碼>"}'
+```
+
+三個決定值得說明：
+
+- **識別碼由伺服器產生，不接受呼叫端自己挑。** 放行任意字串的話，
+  猜一個別人用過的 id 就能讀到別人的對話歷史。不是 GUID 一律回 400。
+- **歷史只存問答文字，不存工具呼叫與工具結果。** tool_use 與 tool_result
+  必須成對且緊鄰，歷史裡塞半套會變成 API 格式錯誤；而且同一段 JSON 每輪重送是純粹的
+  token 浪費。代價是 LLM 看不到上一輪的完整工具輸出，追問細節時它會再查一次 ——
+  這反而保證數字是當下查的，不是從歷史裡抄的。
+- **存在記憶體，不落地。** 對話上下文是短暫的，做成資料表就得回答「誰來清、保留多久、
+  要不要備份」這一整串與這個模組無關的問題。代價是重啟後歷史消失。
+  保留最近 6 輪、最多 200 個對話（滿了淘汰最久沒被碰過的）、閒置 60 分鐘丟棄 ——
+  兩個上限都是必要的：這是長時間執行的服務，沒有上限的話每個新對話都會永久佔著記憶體。
 
 ### 真實 API 驗證怎麼跑
 
@@ -452,14 +474,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-277 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 286 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+291 個測試，分四個專案。另有 9 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 300 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 62 | 計算邏輯（多階 BOM、風險判定、MRP），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 186（+9 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
-| `Erp.Api.Tests` | 18 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Infrastructure.Tests` | 196（+9 需 Ollama，+2 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Api.Tests` | 22 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 11 | 分層邊界 |
 
 幾個值得一提的：
@@ -493,6 +515,11 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 - **`OllamaEmbeddingClientTests`** — 用本機假伺服器檢查送出的請求，並逐一驗證
   連線被拒、404（模型沒 pull）、500、壞 JSON、沒有 `embedding` 欄位、逾時
   各自轉成什麼訊息。不需要裝 Ollama。
+- **`ConversationMemoryTests`** — 驗的是「歷史有沒有被正確組進下一次請求」，
+  **不是**「LLM 有沒有因此聽懂追問」。後者需要真實模型與行為評測，用假 LLM 去斷言
+  它聽懂了，只會測到自己寫的腳本。另外釘住兩件容易忘的事：歷史裡不能出現
+  tool_use／tool_result（成對且緊鄰是 API 的硬性要求），以及兩個對話不得互相污染。
+  反向驗證：不把歷史組進訊息會紅 4 條，拿掉輪數截斷會紅 1 條。
 - **`SystemPromptTests`** — 明確**不驗證 LLM 是否遵守規則**（那需要真實 API 與行為評測），
   防的是有人重寫 prompt 時把某條規則整個刪掉。
 
@@ -593,8 +620,6 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）
-- **AI 助理為單輪問答**，無對話上下文。追問「那它的供應商是誰」時，助理不知道「它」指什麼。
-  `AskAsync` 預留了加 `conversation_id` 的空間，尚未實作。
 - **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
   送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
   （本機沒有金鑰）。驗證這件事的測試（`AnthropicLiveApiTests`）已經寫好，

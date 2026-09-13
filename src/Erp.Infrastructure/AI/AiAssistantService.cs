@@ -6,22 +6,43 @@ namespace Erp.Infrastructure.AI;
 
 /// tool-use 迴圈：把問題送給 LLM，LLM 要求呼叫工具就執行並把結果送回，
 /// 直到它回覆純文字為止，並設輪數上限防止失控。
+///
+/// 跨請求的對話記憶由 IConversationStore 提供：前幾輪的問答會以純文字訊息
+/// 接在這次的問題之前，讓「那 CABLE-07 呢」這種追問有上下文可循。
 public sealed class AiAssistantService(
     ILlmClient llmClient,
     ToolDispatcher toolDispatcher,
+    IConversationStore conversationStore,
     IOptions<AiAssistantOptions> options,
     ILogger<AiAssistantService> logger) : IAiAssistantService
 {
     private readonly AiAssistantOptions _options = options.Value;
 
-    public async Task<string> AskAsync(string question, CancellationToken ct = default)
+    public async Task<AiAnswer> AskAsync(
+        string question, string? conversationId = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(question))
         {
             throw new ArgumentException("問題不可為空", nameof(question));
         }
 
-        var messages = new List<LlmMessage> { LlmMessage.User(question.Trim()) };
+        var trimmedQuestion = question.Trim();
+
+        // 沒帶 id、或帶了一個已經過期／被淘汰的 id，都當成新對話。
+        // 後者不報錯是刻意的：使用者能做的也只有重新開始，回一個錯誤只是多一個步驟。
+        var id = string.IsNullOrWhiteSpace(conversationId)
+            ? Guid.NewGuid().ToString()
+            : conversationId;
+
+        var messages = new List<LlmMessage>();
+
+        foreach (var turn in conversationStore.GetRecentTurns(id))
+        {
+            messages.Add(LlmMessage.User(turn.Question));
+            messages.Add(new LlmMessage(LlmRole.Assistant, [new LlmTextBlock(turn.Answer)]));
+        }
+
+        messages.Add(LlmMessage.User(trimmedQuestion));
 
         for (var iteration = 1; iteration <= _options.MaxToolIterations; iteration++)
         {
@@ -33,7 +54,9 @@ public sealed class AiAssistantService(
 
             if (!response.RequiresToolExecution)
             {
-                return response.Text;
+                // 只有問答文字進歷史，工具往返不進 —— 理由寫在 ConversationTurn 上
+                conversationStore.Append(id, new ConversationTurn(trimmedQuestion, response.Text));
+                return new AiAnswer(response.Text, id);
             }
 
             // LLM 可能一次要求多個工具。所有結果必須放進「同一則」使用者訊息回覆，
@@ -56,8 +79,10 @@ public sealed class AiAssistantService(
 
         logger.LogWarning("tool-use 迴圈達到 {Max} 輪上限仍未得到結論", _options.MaxToolIterations);
 
-        // 回傳訊息而不是拋例外：使用者需要知道發生什麼事，而不是看到一個 500
-        return $"查詢過程需要的步驟超過上限（{_options.MaxToolIterations} 輪）仍未完成，"
-             + "請把問題拆得更具體一些，或直接指定料號與工單號。";
+        // 回傳訊息而不是拋例外：使用者需要知道發生什麼事，而不是看到一個 500。
+        // 這一輪刻意不寫進歷史：它沒有結論，留著只會讓下一輪帶著一段沒有資訊的對白。
+        return new AiAnswer(
+            $"查詢過程需要的步驟超過上限（{_options.MaxToolIterations} 輪）仍未完成，"
+            + "請把問題拆得更具體一些，或直接指定料號與工單號。", id);
     }
 }

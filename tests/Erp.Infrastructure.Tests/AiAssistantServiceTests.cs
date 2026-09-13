@@ -25,8 +25,9 @@ public class AiAssistantServiceTests : IAsyncLifetime
 
     public async Task DisposeAsync() => await _fixture.DisposeAsync();
 
-    private AiAssistantService CreateService(FakeLlmClient llm, int maxIterations = 5)
-        => new(llm, _dispatcher,
+    private AiAssistantService CreateService(
+        FakeLlmClient llm, int maxIterations = 5, IConversationStore? store = null)
+        => new(llm, _dispatcher, store ?? TestServices.CreateConversationStore(),
             Options.Create(new AiAssistantOptions { MaxToolIterations = maxIterations }),
             NullLogger<AiAssistantService>.Instance);
 
@@ -37,7 +38,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
             FakeLlmClient.ToolUse("tu_1", ToolCatalog.GetItemInventoryStatus, new { item_code = "PANEL-01" }),
             FakeLlmClient.Text("面板目前可用庫存 80 片。"));
 
-        var answer = await CreateService(llm).AskAsync("面板還有多少可以用？");
+        var answer = (await CreateService(llm).AskAsync("面板還有多少可以用？")).Answer;
 
         Assert.Equal("面板目前可用庫存 80 片。", answer);
         Assert.Equal(2, llm.ReceivedRequests.Count);
@@ -101,7 +102,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
             FakeLlmClient.ToolUse("tu_1", ToolCatalog.GetItemInventoryStatus, new { item_code = "NOT-EXIST" }),
             FakeLlmClient.Text("查無此料號。"));
 
-        var answer = await CreateService(llm).AskAsync("NOT-EXIST 還有多少？");
+        var answer = (await CreateService(llm).AskAsync("NOT-EXIST 還有多少？")).Answer;
 
         Assert.Equal("查無此料號。", answer);
 
@@ -118,7 +119,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
             FakeLlmClient.ToolUse("tu_1", "delete_all_work_orders", new { }),
             FakeLlmClient.Text("我只能查詢，無法異動資料。"));
 
-        var answer = await CreateService(llm).AskAsync("把工單全部刪掉");
+        var answer = (await CreateService(llm).AskAsync("把工單全部刪掉")).Answer;
 
         Assert.Equal("我只能查詢，無法異動資料。", answer);
 
@@ -152,7 +153,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
                 "tu_x", ToolCatalog.SearchItems, new { keyword = "面板" })
         };
 
-        var answer = await CreateService(llm, maxIterations: 3).AskAsync("繞圈圈");
+        var answer = (await CreateService(llm, maxIterations: 3).AskAsync("繞圈圈")).Answer;
 
         Assert.Equal(3, llm.ReceivedRequests.Count);
         Assert.Contains("超過上限", answer);
@@ -163,7 +164,7 @@ public class AiAssistantServiceTests : IAsyncLifetime
     {
         var llm = new FakeLlmClient(FakeLlmClient.Text("我可以幫你查料件、庫存等資訊。"));
 
-        var answer = await CreateService(llm).AskAsync("你可以做什麼？");
+        var answer = (await CreateService(llm).AskAsync("你可以做什麼？")).Answer;
 
         Assert.Equal("我可以幫你查料件、庫存等資訊。", answer);
         Assert.Single(llm.ReceivedRequests);

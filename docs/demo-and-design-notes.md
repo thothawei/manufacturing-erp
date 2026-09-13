@@ -41,8 +41,8 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ![AI 助理端點的詳細說明](images/scalar-ai-endpoint.png)
 
 端點說明刻意不只寫「這個端點做什麼」，也寫清楚使用上的陷阱 ——
-例如 AI 助理這條寫明「一次請求內部會有多輪 LLM 與工具的往返，但不保存跨請求的對話記憶」，
-因為那正是最常被誤解的地方。
+例如 AI 助理這條寫明「一次請求內部會有多輪 LLM 與工具的往返」，並說清楚
+`conversationId` 的生命週期（記憶體、最近 6 輪、閒置 60 分鐘），因為那正是最常被誤解的地方。
 
 下面第 3 節的 curl 都可以改用這個介面操作，展示時對方不必看終端機。
 
@@ -82,7 +82,7 @@ dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
 ### 開發時的三個指令
 
 ```bash
-dotnet test                          # 277 個測試（本機有 Ollama 時 286）
+dotnet test                          # 291 個測試（本機有 Ollama 時 300）
 dotnet format --verify-no-changes    # 格式是否符合 .editorconfig
 dotnet build -warnaserror            # 警告視為錯誤，與 CI 一致
 ```
@@ -268,6 +268,28 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask \
 ```json
 {"title":"AI 助理暫時無法使用","status":503,"detail":"AI 助理尚未設定 API 金鑰，或金鑰無效"}
 ```
+
+### 3.6b 追問：帶著 conversationId 就接得起來
+
+```bash
+# 第一問，回應會帶 conversationId
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"面板還有多少可以用？"}'
+
+# 追問，帶上剛剛拿到的識別碼
+curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+  -d '{"question":"那 CABLE-07 呢？","conversationId":"..."}'
+```
+
+第二次請求送進 LLM 的訊息是「舊問 → 舊答 → 新問」三則純文字，
+**沒有**上一輪的工具呼叫與工具結果。理由與代價寫在 README 的「對話記憶」那一節。
+
+識別碼由伺服器產生。放行呼叫端自己挑字串的話，猜一個別人用過的 id
+就能讀到別人的對話歷史 —— 不是 GUID 一律回 400，這條有測試把關。
+
+**驗證範圍要說清楚**：`ConversationMemoryTests` 驗的是「歷史有沒有被正確組進下一次請求」，
+不是「LLM 有沒有因此聽懂追問」。後者需要真實模型與行為評測，用假 LLM 去斷言它聽懂了，
+只會測到自己寫的腳本。
 
 ### 3.7 稽核軌跡
 
@@ -573,8 +595,6 @@ SDK 沒有序列化設定點，用 `DelegatingHandler` 在送出前重新序列�
 
 ## 5. 已知限制（會被問到，先準備好）
 
-- **AI 助理是單輪問答**，沒有跨請求的對話記憶。追問「那它的供應商是誰」時不知道「它」指什麼。
-  `AskAsync` 預留了加 `conversation_id` 的空間。
 - **`AnthropicLlmClient` 尚未對真實 API 驗證過。** 送出的 HTTP 請求內容用本機假伺服器
   逐欄檢查過，但沒有金鑰就無法確認 Anthropic 會接受它。
   這是目前唯一「編譯過、測試過、沒真的跑過」的環節。

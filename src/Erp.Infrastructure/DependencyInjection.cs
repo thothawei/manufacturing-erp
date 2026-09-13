@@ -6,6 +6,7 @@ using Erp.Infrastructure.Rag;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Erp.Infrastructure;
 
@@ -33,6 +34,18 @@ public static class DependencyInjection
         services.Configure<AiAssistantOptions>(configuration.GetSection(AiAssistantOptions.SectionName));
 
         services.AddSingleton<ILlmClient, AnthropicLlmClient>();
+
+        // 對話記憶是跨請求的狀態，必須是 singleton —— 註冊成 scoped 的話
+        // 每個 HTTP 請求都會拿到一個空的 store，功能會安靜地變成完全沒作用
+        services.AddSingleton<IConversationStore>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<AiAssistantOptions>>().Value;
+            return new InMemoryConversationStore(
+                options.MaxConversationTurns,
+                options.MaxConversations,
+                TimeSpan.FromMinutes(options.ConversationIdleMinutes));
+        });
+
         services.AddScoped<ToolDispatcher>();
         services.AddScoped<IAiAssistantService, AiAssistantService>();
 

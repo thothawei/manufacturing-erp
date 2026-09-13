@@ -29,7 +29,7 @@ public class AiAssistantScenarioTests : IAsyncLifetime
     public async Task DisposeAsync() => await _fixture.DisposeAsync();
 
     private AiAssistantService CreateService(FakeLlmClient llm)
-        => new(llm, _dispatcher,
+        => new(llm, _dispatcher, TestServices.CreateConversationStore(),
             Options.Create(new AiAssistantOptions()),
             NullLogger<AiAssistantService>.Instance);
 
@@ -50,7 +50,7 @@ public class AiAssistantScenarioTests : IAsyncLifetime
             FakeLlmClient.ToolUse("t2", ToolCatalog.CheckMaterialSufficiency, new { item_code = "TV-100" }),
             FakeLlmClient.Text("以目前可用庫存，TV-100 最多可以生產 40 台。"));
 
-        var answer = await CreateService(llm).AskAsync("TV-100 用現有庫存最多可以做幾台？");
+        var answer = (await CreateService(llm).AskAsync("TV-100 用現有庫存最多可以做幾台？")).Answer;
 
         var search = ToolResultOf(llm, 1);
         Assert.Equal("TV-100", search[0].GetProperty("item_code").GetString());

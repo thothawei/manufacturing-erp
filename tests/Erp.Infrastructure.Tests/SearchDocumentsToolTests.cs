@@ -225,10 +225,10 @@ public class SearchDocumentsToolTests : IAsyncLifetime
             FakeLlmClient.Text("文件查不到，但面板可用 80 片。"));
 
         var service = new AiAssistantService(
-            llm, dispatcher, Options.Create(new AiAssistantOptions()),
+            llm, dispatcher, TestServices.CreateConversationStore(), Options.Create(new AiAssistantOptions()),
             NullLogger<AiAssistantService>.Instance);
 
-        var answer = await service.AskAsync("色偏怎麼處理？面板還有多少？");
+        var answer = (await service.AskAsync("色偏怎麼處理？面板還有多少？")).Answer;
 
         Assert.Contains("80", answer);
         var results = llm.ReceivedRequests[1].Messages[^1].Content.Cast<LlmToolResultBlock>().ToList();
@@ -243,7 +243,8 @@ public class SearchDocumentsToolTests : IAsyncLifetime
     {
         var llm = new FakeLlmClient(FakeLlmClient.Text("好的"));
         var service = new AiAssistantService(
-            llm, CreateDispatcher(), Options.Create(new AiAssistantOptions()),
+            llm, CreateDispatcher(), TestServices.CreateConversationStore(),
+            Options.Create(new AiAssistantOptions()),
             NullLogger<AiAssistantService>.Instance);
 
         await service.AskAsync("色偏怎麼處理？");
