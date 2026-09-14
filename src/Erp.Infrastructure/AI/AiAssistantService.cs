@@ -64,6 +64,17 @@ public sealed class AiAssistantService(
 
             if (!response.RequiresToolExecution)
             {
+                // 沒有工具呼叫、也沒有文字 —— 例如整個回應只有 thinking 區塊，
+                // 或 gateway 的空內容佔位符在 LLM client 那層被丟掉了。
+                // 空字串不是答案，直接回傳的話使用者只會看到一片空白。
+                //
+                // 這一輪也刻意不寫進對話歷史：它沒有結論，留著只會讓下一輪
+                // 帶著一段沒有資訊的對白（理由與下面那個輪數上限的出口相同）。
+                if (string.IsNullOrWhiteSpace(response.Text))
+                {
+                    return new AiAnswer("AI 這次沒有回覆任何內容，請換個問法再試一次。", id);
+                }
+
                 // 只有問答文字進歷史，工具往返不進 —— 理由寫在 ConversationTurn 上
                 conversationStore.Append(storeKey, new ConversationTurn(trimmedQuestion, response.Text));
                 return new AiAnswer(response.Text, id);

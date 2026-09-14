@@ -21,11 +21,15 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-394 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 424；
-另有 3 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
-**唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
-發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
-這件事現在有一組隨時可跑的測試在等金鑰 —— 見「真實 API 驗證怎麼跑」。
+394 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 424；
+沒裝時它們標記為 6 個 skip，另有 3 個接真實 Anthropic API 的測試同樣 skip）。
+
+**還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
+假伺服器逐欄檢查，整條路徑也實跑通過一次 —— `/api/ai-assistant/ask` → tool-use 迴圈
+→ OmniRoute gateway → provider → 工具查到真實的 seed 資料 → 最終答案，
+九個工具逐一驗、平行呼叫與錯誤路徑都走過。**但 provider 那端是本機 stub，不是真的模型**，
+而且沒打過 `api.anthropic.com`。接正式端點的測試（`AnthropicLiveApiTests`）已經寫好，
+設好金鑰跑一次就會產出可歸檔的紀錄 —— 見「真實 API 驗證怎麼跑」。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
 見「為什麼不是 nomic-embed-text」。
 
@@ -164,26 +168,51 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ## AI 助理
 
-需要 Anthropic API 金鑰。本機開發用 user-secrets（存在專案外，不可能被誤 commit）：
+預設不直接打 Anthropic 官方，而是走本機的 [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway。
+`AnthropicLlmClient` 的轉換程式碼一行都不用改：OmniRoute 有 Anthropic 相容的
+`/v1/messages` 端點，只要把 `AiAssistant:BaseUrl` 指到它的根網址，
+`/v1/messages` 這段由 SDK 自己接上去。
 
 ```bash
-dotnet user-secrets set "AiAssistant:ApiKey" "sk-ant-..." --project src/Erp.Api
+npm install -g omniroute && omniroute   # 另開一個終端機跑著，預設 20128 埠
 ```
 
-macOS 上也可以先把金鑰複製到剪貼簿，再執行 `./scripts/set-api-key.sh` ——
-它會檢查前綴與長度後才寫入，避免把錯的東西存進去（金鑰不會顯示在畫面或 shell history）。
-
-或用環境變數（正式環境的做法）：
+金鑰改填 OmniRoute 儀表板 → Endpoints 的那一把（格式是 `sk-<machineId>-<keyId>-<crc>`）。
+本機開發用 user-secrets（存在專案外，不可能被誤 commit）：
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+dotnet user-secrets set "AiAssistant:ApiKey" "sk-..." --project src/Erp.Api
 ```
 
-兩者都不要寫進 `appsettings.json`。啟動時會印出生效的設定與金鑰來源（只印來源、不印值）：
+`./scripts/set-api-key.sh` 只收 `sk-ant-` 開頭的官方金鑰，擋掉貼錯東西的情況 ——
+OmniRoute 的金鑰請用上面那行直接寫入。金鑰不要寫進 `appsettings.json`。
+
+模型代號也是 OmniRoute 的，預設釘死 `anthropic/claude-opus-5`（帶 provider 前綴的完整代號），
+所以 OmniRoute 那邊要先連好一個能出 Claude 的 provider。
+九個工具全靠 tool-use，釘死才知道是誰在答、答得好不好；
+換成 `auto` 是交給它按當下可用的 provider 自動選（帶 `tools` 的請求會走它的
+tool-bearing bypass，轉給單一模型處理，tool-use 不會被拆散），但路由到哪個模型是 runtime 才知道的事。
+
+跟官方端點有一個行為差異是實測出來、程式碼有處理的：上游 provider 回空內容時，
+OmniRoute 會補一個寫死 `(empty response)` 的 text 區塊（官方端點只會回 `tool_use`，
+不補這一塊）。`AnthropicLlmClient` 會把這個佔位符丟掉，`AiAssistantService` 則在
+最終回應完全沒有文字時回一句說得清楚的話，不會把英文佔位符或空字串當成答案送出去。
+
+啟動時會印出生效的設定、端點與金鑰來源（只印來源、不印值）：
 
 ```
-AI 助理設定：模型 claude-opus-5，工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
+AI 助理設定：模型 anthropic/claude-opus-5，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
 ```
+
+### 改回直接打 Anthropic 官方
+
+`appsettings.json` 的 `AiAssistant` 拿掉 `BaseUrl`、`UseServerSideFallback` 設回 `true`、
+`Model` 改回 `claude-opus-5`，金鑰換成 `sk-ant-...`（或環境變數 `ANTHROPIC_API_KEY`）即可。
+
+`UseServerSideFallback` 管的是 Anthropic 的 server-side refusal fallback ——
+安全分類器拒答時自動改由 `claude-opus-4-8` 作答。那是官方端點才有的請求參數，
+所以打 gateway 時 beta 旗標與 `fallbacks` 整組不送（不是送成 `null`，是整個欄位不出現），
+備援交給 OmniRoute 自己的路由做。兩層備援疊在一起只會讓「這句話是誰答的」變得無法追。
 
 ```bash
 dotnet run --project src/Erp.Api --urls http://localhost:5199
@@ -739,8 +768,8 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-394 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 424 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+394 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 424 個；接真實 Anthropic API 的 3 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
@@ -748,6 +777,28 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 | `Erp.Infrastructure.Tests` | 254（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
 | `Erp.Api.Tests` | 35 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
+
+**「30 個」與「6 個 skip」是同一組測試**：`OllamaTheory` 在 skip 時不展開
+`InlineData`，所以沒裝 Ollama 的機器上看到的是 6 個 skip（2 個 Theory + 4 個 Fact），
+裝了之後才會展開成 30 個實際執行的案例。兩個數字都對，只是計數的時機不同 ——
+這件事值得寫出來，因為它看起來很像文件寫錯了。
+
+### 端到端腳本（不在 CI 裡）
+
+```bash
+omniroute                      # 另一個終端機
+./scripts/e2e-omniroute.sh
+```
+
+上面那些測試都停在 `AnthropicLlmClient` 的邊界：單元測試用假的 `ILlmClient`，
+wire format 測試用假的 Anthropic 伺服器。**gateway 那一層的轉譯沒有任何測試看得到** ——
+Anthropic 格式 ←→ OpenAI 格式、九個工具的定義、`tool_use`/`tool_result` 來回，
+而那正是最容易默默壞掉的地方。這支腳本把整條打通一次，逐一驗九個工具、
+平行工具呼叫與錯誤契約，全過回 0。
+
+provider 端是 `scripts/fake-openai-provider.mjs`，照問句裡的 `@@CALL <工具> <參數>@@`
+吐出指定的 tool_call —— 要驗的是路徑與轉譯，不是模型答得好不好，
+所以 provider 必須可重複、不花錢。需要跑起真的 ERP 與 gateway，因此不放進 CI。
 
 幾個值得一提的：
 
@@ -894,10 +945,16 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）
-- **`AnthropicLlmClient` 尚未對真實 Anthropic API 驗證過**。tool-use 迴圈由整組測試涵蓋，
-  送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，但從未實際打過一次 Anthropic API
-  （本機沒有金鑰）。驗證這件事的測試（`AnthropicLiveApiTests`）已經寫好，
-  設好金鑰跑一次就會產出可歸檔的紀錄 —— 見「真實 API 驗證怎麼跑」。
+- **`AnthropicLlmClient` 尚未對真的模型驗證過**。tool-use 迴圈由整組測試涵蓋，
+  送出的 HTTP 請求內容也用本機假伺服器逐欄檢查過，整條路徑（端點 → 迴圈 → OmniRoute
+  → provider → 工具查真實資料 → 最終答案）也實跑過一輪九個工具、平行呼叫與錯誤路徑，
+  但 provider 那端是本機 stub，從未打過 `api.anthropic.com`（本機沒有金鑰）。
+  接正式端點的測試（`AnthropicLiveApiTests`）已經寫好，設好金鑰跑一次就會產出
+  可歸檔的紀錄 —— 見「真實 API 驗證怎麼跑」。
+- **走 gateway 時 `tool_result` 的 `is_error` 旗標會被丟掉**：OpenAI 的訊息格式沒有這個欄位，
+  OmniRoute 轉譯時只留下 content。這不影響錯誤處理 —— 系統提示詞是依 content 裡的
+  `error_code` 決定怎麼做，不是依那個旗標，實測 `ENTITY_NOT_FOUND` 與
+  `SERVICE_UNAVAILABLE` 都完整送到模型手上。打官方端點時旗標照常送出。
 - **RAG 的檢索是 brute-force 全表掃描**：每次查詢載入全部向量。33 個片段無感
   （768 維 × 33 段約兩萬次乘加），數萬份文件要換 ANN 索引 —— 那時要換的是
   `DocumentSearchService` 一個類別，不是整個架構。

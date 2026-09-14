@@ -9,12 +9,21 @@ namespace Erp.Infrastructure.AI;
 /// ILlmClient 的 Anthropic 實作。
 /// 只做兩件事：把中性模型轉成 SDK 型別送出，再把回應轉回中性模型。
 /// 換成別家 LLM 時只要換掉這個類別，tool-use 迴圈與工具定義都不用動。
+/// 端點可以是 Anthropic 官方，也可以是 OmniRoute 這類 Anthropic 相容 gateway
+/// —— 兩者的差別只在設定，見 AiAssistantOptions 的 BaseUrl 與 UseServerSideFallback。
 public sealed class AnthropicLlmClient : ILlmClient
 {
     /// 伺服器端 refusal fallback：安全分類器拒絕時自動改由備援模型作答，
     /// 使用者不會收到一個沒有內容的失敗回應。
     private const string ServerSideFallbackBeta = "server-side-fallback-2026-06-01";
     private const string FallbackModel = "claude-opus-4-8";
+
+    /// OmniRoute 在上游回空內容時會補一個寫死這句話的 text 區塊
+    /// （open-sse/handlers/responseTranslator.ts，沒有開關可以關掉）。
+    /// 官方端點不會有這一塊，留著它有兩個後果：它會被當成 assistant 的發言
+    /// 回送進對話歷史，而且「上游沒給內容」會變成一句使用者看不懂的英文佔位符。
+    /// 實測確認過的行為，見 README「AI 助理」。
+    private const string GatewayEmptyPlaceholder = "(empty response)";
 
     private readonly AnthropicClient _client;
     private readonly AiAssistantOptions _options;
@@ -81,18 +90,41 @@ public sealed class AnthropicLlmClient : ILlmClient
 
     private async Task<LlmResponse> SendCoreAsync(LlmRequest request, CancellationToken ct)
     {
-        var response = await _client.Beta.Messages.Create(new MessageCreateParams
+        var response = await _client.Beta.Messages.Create(BuildParams(request));
+
+        return new LlmResponse([.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()]);
+    }
+
+    /// refusal fallback 只有 Anthropic 官方端點吃得下，打 gateway 時整組省略。
+    /// 理由跟建構式那邊一樣：不要的項目要整個不出現在初始設定式裡 ——
+    /// 設成 null 不是「沒送」，SDK 會照樣把 "fallbacks": null 寫進請求本文。
+    private MessageCreateParams BuildParams(LlmRequest request)
+    {
+        List<BetaToolUnion> tools = [.. request.Tools.Select(ToSdkTool)];
+        List<BetaMessageParam> messages = [.. request.Messages.Select(ToSdkMessage)];
+
+        if (!_options.UseServerSideFallback)
+        {
+            return new MessageCreateParams
+            {
+                Model = _options.Model,
+                MaxTokens = _options.MaxTokens,
+                System = request.SystemPrompt,
+                Tools = tools,
+                Messages = messages
+            };
+        }
+
+        return new MessageCreateParams
         {
             Model = _options.Model,
             MaxTokens = _options.MaxTokens,
             System = request.SystemPrompt,
             Betas = [ServerSideFallbackBeta],
             Fallbacks = new BetaFallbacksParam(new BetaFallbackParam[] { new() { Model = FallbackModel } }),
-            Tools = [.. request.Tools.Select(ToSdkTool)],
-            Messages = [.. request.Messages.Select(ToSdkMessage)]
-        });
-
-        return new LlmResponse([.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()]);
+            Tools = tools,
+            Messages = messages
+        };
     }
 
     private static BetaToolUnion ToSdkTool(ToolDefinition tool) => new BetaTool
@@ -143,7 +175,7 @@ public sealed class AnthropicLlmClient : ILlmClient
     {
         if (block.TryPickText(out BetaTextBlock? text))
         {
-            return new LlmTextBlock(text.Text);
+            return text.Text == GatewayEmptyPlaceholder ? null : new LlmTextBlock(text.Text);
         }
 
         if (block.TryPickToolUse(out BetaToolUseBlock? toolUse))
