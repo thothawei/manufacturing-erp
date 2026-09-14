@@ -1,0 +1,8 @@
+{
+  "itemCode": "TV-100",
+  "bomVersion": "v3",
+  "basis": "available",
+  "maxBuildableQty": 40,
+  "sufficientForRequestedQty": null,
+  "shortageComponents": []
+}

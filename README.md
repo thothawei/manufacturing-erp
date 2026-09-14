@@ -7,13 +7,22 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 其中十個是唯讀查詢，唯一會寫入的那個寫出來的是「待人工確認的採購建議」，不是採購單。
 最後一個工具是本機向量檢索（RAG），在 SOP、維修手冊與客訴紀錄裡找相關段落並附上引用來源。
 
+![展示影片](docs/images/demo.gif)
+
+五十秒的操作實錄：可用庫存與帳上庫存的差別、多階 BOM 展開的可製造量、
+兩種來源的工單風險、MRP 的建議採購量、時間分期算出「第幾週開始缺」、
+規則式與 ML 模型並陳的延遲風險，最後是測試綠燈。
+**畫面上每一個數字都是真的打 API 跑出來的** —— 指令與輸出成對存在
+[`tools/demo-video/data/`](tools/demo-video/data/)，可以自己重跑對照
+（[原始 mp4](docs/videos/demo.mp4)、[產生方式](tools/demo-video/README.md)）。
+
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
-啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
+不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
 387 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 417；
-另有 2 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
+另有 3 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
 這件事現在有一組隨時可跑的測試在等金鑰 —— 見「真實 API 驗證怎麼跑」。

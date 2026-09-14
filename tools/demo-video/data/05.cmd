@@ -1,0 +1,1 @@
+curl -s 'localhost:5199/api/mrp/time-phased?itemCode=PANEL-01' | jq -r '.items[0] | "期初可用 \(.openingAvailableQty) 片，第 \(.firstShortageWeek) 週就見底", (.buckets[0,1,6] | "第 \(.weekIndex) 週：入庫 \(.scheduledReceiptQty)、需求 \(.requirementQty) → 期末水位 \(.projectedOnHandQty)")'

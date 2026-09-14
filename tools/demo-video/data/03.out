@@ -1,0 +1,16 @@
+[
+  {
+    "workOrderNo": "WO-20260914-02",
+    "itemCode": "MON-200",
+    "dueDate": "2026-09-12",
+    "delayDays": 2,
+    "riskReason": "已逾交期 2 天，尚有 10 個未完工"
+  },
+  {
+    "workOrderNo": "WO-20260914-01",
+    "itemCode": "TV-100",
+    "dueDate": "2026-09-17",
+    "delayDays": 2,
+    "riskReason": "缺料：PANEL-01 短少 120 件"
+  }
+]

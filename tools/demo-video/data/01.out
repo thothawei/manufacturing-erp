@@ -1,0 +1,9 @@
+{
+  "itemCode": "PANEL-01",
+  "itemName": "面板",
+  "unit": "片",
+  "onHandQty": 100,
+  "reservedQty": 20,
+  "availableQty": 80,
+  "asOf": "2026-09-14"
+}

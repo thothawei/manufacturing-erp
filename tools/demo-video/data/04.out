@@ -1,0 +1,12 @@
+{
+  "itemCode": "PANEL-01",
+  "itemName": "面板",
+  "grossRequirementQty": 200,
+  "availableQty": 80,
+  "inTransitQty": 0,
+  "netShortageQty": 120,
+  "neededByDate": "2026-09-17",
+  "suggestedOrderQty": 150,
+  "supplierCode": "SUP-008",
+  "leadTimeDays": 5
+}

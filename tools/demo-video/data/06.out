@@ -1,0 +1,15 @@
+{
+  "ruleBasedDelayDays": 2,
+  "ruleBasedReason": "缺料：PANEL-01 短少 120 件",
+  "predictedDelayProbability": 0.6855952739715576,
+  "exceedsThreshold": true,
+  "features": {
+    "materialReadiness": 0.4,
+    "daysUntilDue": 3,
+    "maxLeadTimeDays": 5,
+    "progressRatio": 0,
+    "itemOverdueRate": 0,
+    "weeklyLoadRatio": 0.125,
+    "bomComponentCount": 3
+  }
+}
