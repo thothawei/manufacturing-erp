@@ -18,10 +18,10 @@ LLM 拿到的是結果，不是原料。
 
 1. **Clean Architecture 四層，依賴方向由測試保護** ——
    `Api → Infrastructure → Application → Domain`，Domain 不知道 AI 與 EF Core 的存在。
-   這條邊界由 11 個架構測試把關，不是靠自律。
+   這條邊界由 12 個架構測試把關，不是靠自律。
 2. **十二個工具的 tool-use 迴圈** —— 工具契約、錯誤碼、稽核 log 都有明確設計；
    LLM 供應商被抽象在 `ILlmClient` 後面，換一家只要換一個類別。
-3. **本機 RAG（第十個工具）** —— Ollama embedding + SQLite 向量檢索，
+3. **本機 RAG（十二個工具的最後一個）** —— Ollama embedding + SQLite 向量檢索，
    回傳的是**段落與來源引用**，不是「答案」，因為答案從哪來必須追得到。
 4. **一次真實的模型選型事故，變成了 CI 的一道把關** ——
    第一版預設 `nomic-embed-text`，全部測試綠燈，裝上真模型才發現：
@@ -41,8 +41,8 @@ LLM 拿到的是結果，不是原料。
 |---|---|
 | 測試 | 394 個（本機有 Ollama 時 424），0 警告，CI 兩個 job 全綠 |
 | AI 工具 | 12 個（11 唯讀 + 1 寫入建議），背後 10 個 Application 服務 |
-| 架構邊界 | 11 個架構測試守住分層依賴 |
-| 文件 | 規劃 v1 → v2 → v3 三版逐條對帳，決策與取捨都留下理由 |
+| 架構邊界 | 12 個架構測試守住分層依賴 |
+| 文件 | AI 助理規劃 v1 → v2 → v3 逐條對帳，另有 RAG 與 ML 兩份獨立的決策紀錄 |
 
 ## 示範問答
 
@@ -61,8 +61,10 @@ LLM 組成一段自然語言。**中間每個數字都來自後端，而且都�
 
 - `AnthropicLlmClient` 尚未對真實 Anthropic API 打過請求（開發機沒有金鑰）；
   送出的 HTTP 請求已用假伺服器逐欄檢查，接正式端點的測試也寫好了，只差跑一次。
-- MRP 沒有做時間分桶、BOM 展開是逐階查詢、RAG 是 brute-force 全表掃描 ——
-  這些在目前資料規模下都不構成問題，而「什麼時候該優化、什麼時候不該」本身就是判斷的一部分。
+- **ML 延遲風險模型是用模擬資料訓練的**，展示資料的特徵還落在訓練分布之外。
+  它證明的是「這條 pipeline 接起來了、每個決策講得清楚」，不是「模型對真實產線有效」。
+- BOM 展開是逐階查詢、RAG 是 brute-force 全表掃描 —— 這兩個在目前資料規模下
+  都不構成問題，而「什麼時候該優化、什麼時候不該」本身就是判斷的一部分。
 - 完整的已知限制清單在 [README 的「尚未處理」](../README.md#尚未處理)。
 
 ## 去哪裡看
@@ -73,3 +75,6 @@ LLM 組成一段自然語言。**中間每個數字都來自後端，而且都�
 | 架構決策與踩過的坑 | [`README.md`](../README.md) |
 | 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](ai-assistant-module-plan-v2.md) |
 | RAG 的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](rag-module-plan-v1.md) |
+| ML 模組的資料、特徵、閾值與 skew 防線 | [`docs/ml-risk-prediction-module-plan-v1.md`](ml-risk-prediction-module-plan-v1.md) |
+| 五十秒的操作實錄（每個數字都是真跑的） | [README 最上方的影片](../README.md) |
+| 怎麼把展示站部署上線 | [`deploy/README.md`](../deploy/README.md) |

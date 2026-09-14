@@ -19,7 +19,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
 394 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 424；
 另有 3 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
@@ -53,7 +53,7 @@ docker build -t erp-demo . && docker run --rm -p 8088:8080 erp-demo
 | 一頁式重點（趕時間的話看這份） | [`docs/one-pager.md`](docs/one-pager.md) |
 | 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md) |
 | 架構決策與踩過的坑 | 本文件以下各節 |
-| 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有九處註解指向它） |
+| 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有五處註解指向它） |
 | 工單延遲風險預測（ML）的每個決策與取捨 | [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md) |
 | 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
 | RAG 模組的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md) |
@@ -118,7 +118,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -132,9 +132,13 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 3 — 補完 8 個工具、架構測試與防幻覺測試 | 完成 |
 | Phase 3.5 — 規劃對帳後補齊的缺口（錯誤處理、錯誤碼、稽核 log、user-secrets） | 完成 |
 | Phase 4 — 展示準備 | 完成（`docs/demo-and-design-notes.md`）；真實 API 驗證的測試已就緒，待金鑰實跑 |
-| Phase 5 — 文件語意檢索（RAG，第 9 個工具） | 完成，已對真實 Ollama 實跑驗證（實測換掉了預設 embedding 模型） |
+| Phase 5 — 文件語意檢索（RAG） | 完成，已對真實 Ollama 實跑驗證（實測換掉了預設 embedding 模型） |
+| Phase 6 — 把已知限制逐條收掉 | 完成（對話記憶、風險視窗、MRP 重複計算、時間分期、檢索評測集、角色隔離） |
+| Phase 7 — 工單延遲風險預測（ML） | 完成（[`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)），訓練資料是模擬的 |
+| Phase 8 — Agent 能力擴充 | 完成（prompt injection 對抗測試、可寫入工具 + 人工確認流程） |
+| Phase 9 — 展示與部署 | 完成（展示影片、一頁式摘要、容器化與 Render／Fly.io 設定）；公開網址待部署 |
 
-### 八個 Application 服務（AI 工具背後真正做事的地方）
+### 十個 Application 服務（AI 工具背後真正做事的地方）
 
 | 服務 | 職責 |
 |---|---|
@@ -146,6 +150,8 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | `MrpCalculationService` | MRP 缺料試算與建議採購量 |
 | `PurchasingQueryService` | 未結案採購單查詢 |
 | `QualityInspectionQueryService` | 品管檢驗結果彙總 |
+| `PurchaseSuggestionService` | 採購建議：AI 寫建議、人工核准才成立採購單 |
+| `WorkOrderDelayRiskPredictionService` | 延遲風險：規則式與 ML 模型並陳 |
 
 ## 四個必須知道的計算約定
 
@@ -418,7 +424,7 @@ RAG 的檢索層另外記一筆，因為通用那行記不到它獨有的兩個�
 
 ## 文件語意檢索（RAG）—— 可選模組
 
-**沒裝 Ollama 也能跑。** 核心 ERP 與前八個工具完全不依賴它，只有 `search_documents`
+**沒裝 Ollama 也能跑。** 核心 ERP 與其餘十一個工具完全不依賴它，只有 `search_documents`
 會回 `SERVICE_UNAVAILABLE` 並說明原因。`dotnet run` 直接跑得起來，不會因為少裝東西而啟動失敗。
 
 要啟用的話需要本機 Ollama：
@@ -442,7 +448,7 @@ ollama pull bge-m3
 沒裝 Ollama 時印的是：
 
 ```
-文件語意檢索：索引 0 段，模型 bge-m3，相似度門檻 0.5（索引未建立：需要本機 Ollama 並執行 ollama pull bge-m3；其他八個工具不受影響）
+文件語意檢索：索引 0 段，模型 bge-m3，相似度門檻 0.5（索引未建立：需要本機 Ollama 並執行 ollama pull bge-m3；其餘工具不受影響）
 ```
 
 ### 技術選擇
@@ -787,7 +793,7 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 ### 每條防線都做過反向驗證
 
 把防線拔掉、確認測試會紅，再還原。沒有紅過的測試等於沒有測試。
-十二條防線的驗證結果列在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
+二十九條防線的驗證結果列在 [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)。
 
 這個習慣抓到過一次自己的錯誤：架構測試第一次反向驗證是綠的，一度以為測試無效，
 深挖後發現是實驗寫錯 —— `nameof` 是編譯期常數不留型別參考，改用 `typeof` 就紅了。
@@ -876,8 +882,15 @@ curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120
 
 ## 尚未處理
 
-- **MRP 沒有時間分桶（time-phasing）**：同一料號的需求日一律取最早的那張工單，
-  若最急的是一張小需求，整批需求都會被貼上該日期，建議採購會偏保守。
+- **`/api/mrp/shortages` 仍然把需求日收斂到最早的那張工單**：若最急的是一張小需求，
+  整批需求都會被貼上該日期，建議採購會偏保守。這是刻意保留的 ——
+  「總共缺多少、要訂多少」與「什麼時候開始缺」是兩個問題，後者由
+  `/api/mrp/time-phased` 回答（見「時間分期」）。兩個端點各司其職，
+  把分期塞回前者只會讓一個回傳同時回答兩件事。
+- **ML 延遲風險模型是用模擬資料訓練的**，而且展示資料的特徵落在訓練分布之外
+  （`weekly_load_ratio` 算出來 0.125，訓練分布是 0.5~1.6）。沒有分布檢查、
+  沒有機率校準、沒有模型監控與重訓機制。完整清單在
+  [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)。
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）

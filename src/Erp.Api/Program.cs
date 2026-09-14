@@ -113,7 +113,7 @@ app.Logger.LogInformation(
     "文件語意檢索：索引 {ChunkCount} 段，模型 {Model}，相似度門檻 {Threshold}{Hint}",
     ragChunkCount, ragOptions.EmbeddingModel, ragOptions.SimilarityThreshold,
     ragChunkCount == 0
-        ? $"（索引未建立：需要本機 Ollama 並執行 ollama pull {ragOptions.EmbeddingModel}；其他八個工具不受影響）"
+        ? $"（索引未建立：需要本機 Ollama 並執行 ollama pull {ragOptions.EmbeddingModel}；其餘工具不受影響）"
         : string.Empty);
 
 // 展示站的首頁。
@@ -178,8 +178,8 @@ app.MapPost("/api/ai-assistant/ask", async (
     })
     .WithSummary("AI 助理問答")
     .WithDescription(
-        "以自然語言提問，AI 透過十一個工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
-        "十個工具是唯讀的；唯一會寫入的 suggest_purchase_order 產生的是待人工確認的採購建議，" +
+        "以自然語言提問，AI 透過十二個工具查詢系統資料後回答（含一個本機向量檢索工具）。" +
+        "其中十一個是唯讀的；唯一會寫入的 suggest_purchase_order 產生的是待人工確認的採購建議，" +
         "不會成立採購單。" +
         "一次請求內部會有多輪 LLM 與工具的往返（上限 5 輪）。" +
         "回應會帶一個 conversationId，下次請求帶著它就能接續同一段對話（記憶最近 6 輪問答，" +
