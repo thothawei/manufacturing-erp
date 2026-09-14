@@ -74,7 +74,7 @@ src/
   Erp.Api             HTTP 端點
 tests/
   Erp.Application.Tests      Application 層單元測試（以 in-memory 假 Repository 驅動）
-  Erp.Infrastructure.Tests   EF Core 整合測試、tool-use 迴圈測試、Anthropic wire format 測試
+  Erp.Infrastructure.Tests   EF Core 整合、tool-use 迴圈、wire format、RAG、ML 推論
   Erp.Api.Tests              HTTP 端點測試（例外 → 狀態碼對映）
   Erp.ArchitectureTests      分層邊界測試（Domain 不得碰 AI 或 EF Core）
 docs/
@@ -215,7 +215,9 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 ```bash
-curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' -d '{"question":"面板還有多少可以用？"}'
+curl -X POST http://localhost:5199/api/ai-assistant/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"面板還有多少可以用？"}'
 ```
 
 沒設金鑰時回 503 與清楚訊息，不會洩漏 SDK 堆疊。
@@ -227,7 +229,8 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 
 ```bash
 # AI 端：產生建議（狀態 PendingApproval，沒有任何採購單成立）
-curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+curl -X POST http://localhost:5199/api/ai-assistant/ask \
+  -H 'Content-Type: application/json' \
   -d '{"question":"缺料的部分幫我開採購建議"}'
 
 # 人工端：看清單、核准或駁回。核准才會產生正式採購單
@@ -288,7 +291,8 @@ curl -X POST http://localhost:5199/api/purchase-suggestions/PS-20260913-001/appr
 可選的 `role` 參數會限制這次請求用得到哪些工具：
 
 ```bash
-curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+curl -X POST http://localhost:5199/api/ai-assistant/ask \
+  -H 'Content-Type: application/json' \
   -d '{"question":"面板的採購單狀況？","role":"quality"}'
 ```
 
@@ -328,7 +332,8 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 回應會帶一個 `conversationId`，下次請求帶著它就能接續同一段對話：
 
 ```bash
-curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
+curl -X POST http://localhost:5199/api/ai-assistant/ask \
+  -H 'Content-Type: application/json' \
   -d '{"question":"那 CABLE-07 呢？","conversationId":"<上一次回應裡的識別碼>"}'
 ```
 
@@ -920,9 +925,14 @@ TV-100  ├── PANEL-01   × 2
 情境重點：面板帳上 100 片、保留 20 片，可用只有 80 片。
 
 ```bash
-curl "http://localhost:5199/api/items/TV-100/sufficiency"    # 最多做 40 台（用帳上庫存會誤算成 50 台）
-curl "http://localhost:5199/api/work-orders/at-risk"          # 兩張風險工單，各延遲 2 天
-curl "http://localhost:5199/api/mrp/shortages"                # 面板淨缺 120 片，建議下單 150 片
+# 最多做 40 台（用帳上庫存會誤算成 50 台）
+curl "http://localhost:5199/api/items/TV-100/sufficiency"
+
+# 兩張風險工單，各延遲 2 天
+curl "http://localhost:5199/api/work-orders/at-risk"
+
+# 面板淨缺 120 片，建議下單 150 片
+curl "http://localhost:5199/api/mrp/shortages"
 ```
 
 這些數字都被 `SeededScenarioTests` 釘住，改動種子資料而沒同步更新文件時測試會先紅。
