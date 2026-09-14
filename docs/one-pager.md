@@ -69,12 +69,10 @@ LLM 組成一段自然語言。**中間每個數字都來自後端，而且都�
 
 ## 去哪裡看
 
-| 想看什麼 | 去哪裡 |
-|---|---|
-| 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](demo-and-design-notes.md) |
-| 架構決策與踩過的坑 | [`README.md`](../README.md) |
-| 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](ai-assistant-module-plan-v2.md) |
-| RAG 的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](rag-module-plan-v1.md) |
-| ML 模組的資料、特徵、閾值與 skew 防線 | [`docs/ml-risk-prediction-module-plan-v1.md`](ml-risk-prediction-module-plan-v1.md) |
-| 五十秒的操作實錄（每個數字都是真跑的） | [README 最上方的影片](../README.md) |
-| 怎麼把展示站部署上線 | [`deploy/README.md`](../deploy/README.md) |
+- **五十秒的操作實錄**（每個數字都是真跑的）—— [README 最上方的影片](../README.md)
+- **三十秒跑起來、實際輸出、設計問答** —— [`docs/demo-and-design-notes.md`](demo-and-design-notes.md)
+- **架構決策與踩過的坑** —— [`README.md`](../README.md)
+- **工具契約、庫存計算基準、防幻覺機制** —— [`docs/ai-assistant-module-plan-v2.md`](ai-assistant-module-plan-v2.md)
+- **RAG 的範疇、資料流、七個決策點** —— [`docs/rag-module-plan-v1.md`](rag-module-plan-v1.md)
+- **ML 模組的資料、特徵、閾值與 skew 防線** —— [`docs/ml-risk-prediction-module-plan-v1.md`](ml-risk-prediction-module-plan-v1.md)
+- **怎麼把展示站部署上線** —— [`deploy/README.md`](../deploy/README.md)
