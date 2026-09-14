@@ -52,16 +52,14 @@ docker build -t erp-demo . && docker run --rm -p 8088:8080 erp-demo
 其餘端點（庫存、BOM、工單風險、MRP、時間分期、ML 延遲風險）都不依賴外部服務，
 在展示站上完全可用。
 
-| 想看什麼 | 去哪裡 |
-|---|---|
-| 一頁式重點（趕時間的話看這份） | [`docs/one-pager.md`](docs/one-pager.md) |
-| 三十秒跑起來、實際輸出、設計問答 | [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md) |
-| 架構決策與踩過的坑 | 本文件以下各節 |
-| 工具契約、庫存計算基準、防幻覺機制 | [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有五處註解指向它） |
-| 工單延遲風險預測（ML）的每個決策與取捨 | [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md) |
-| 規劃與實作的逐條對帳、剩餘工作 | [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md) |
-| RAG 模組的範疇、資料流、七個決策點 | [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md) |
-| 最初的規劃長什麼樣 | [`docs/ai-assistant-module-plan-v1.md`](docs/ai-assistant-module-plan-v1.md)（動工前原貌） |
+- **趕時間的話看這份** —— [`docs/one-pager.md`](docs/one-pager.md)，一頁式重點
+- **三十秒跑起來、實際輸出、設計問答** —— [`docs/demo-and-design-notes.md`](docs/demo-and-design-notes.md)
+- **架構決策與踩過的坑** —— 本文件以下各節
+- **工具契約、庫存計算基準、防幻覺機制** —— [`docs/ai-assistant-module-plan-v2.md`](docs/ai-assistant-module-plan-v2.md)（程式碼有五處註解指向它）
+- **工單延遲風險預測（ML）的每個決策與取捨** —— [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)
+- **RAG 的範疇、資料流、七個決策點** —— [`docs/rag-module-plan-v1.md`](docs/rag-module-plan-v1.md)
+- **規劃與實作的逐條對帳、剩餘工作** —— [`docs/ai-assistant-module-plan-v3.md`](docs/ai-assistant-module-plan-v3.md)
+- **最初的規劃長什麼樣** —— [`docs/ai-assistant-module-plan-v1.md`](docs/ai-assistant-module-plan-v1.md)（動工前原貌）
 
 規劃演進是 **v1 原始構想 → v2 動工前修訂 → v3 實作完成後對帳**。
 
@@ -144,18 +142,16 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 
 ### 十個 Application 服務（AI 工具背後真正做事的地方）
 
-| 服務 | 職責 |
-|---|---|
-| `ItemMasterQueryService` | 料號／品名關鍵字搜尋 |
-| `InventoryQueryService` | 帳上／保留／可用庫存查詢 |
-| `BomExplosionService` | 多階 BOM 展開、以可用庫存試算最大可製造量與缺料件 |
-| `WorkOrderProgressService` | 工單途程進度查詢 |
-| `WorkOrderRiskService` | 工單延遲風險判定（逾期 + 缺料兩種來源） |
-| `MrpCalculationService` | MRP 缺料試算與建議採購量 |
-| `PurchasingQueryService` | 未結案採購單查詢 |
-| `QualityInspectionQueryService` | 品管檢驗結果彙總 |
-| `PurchaseSuggestionService` | 採購建議：AI 寫建議、人工核准才成立採購單 |
-| `WorkOrderDelayRiskPredictionService` | 延遲風險：規則式與 ML 模型並陳 |
+- `ItemMasterQueryService` —— 料號／品名關鍵字搜尋
+- `InventoryQueryService` —— 帳上／保留／可用庫存查詢
+- `BomExplosionService` —— 多階 BOM 展開、以可用庫存試算最大可製造量與缺料件
+- `WorkOrderProgressService` —— 工單途程進度查詢
+- `WorkOrderRiskService` —— 工單延遲風險判定（逾期 + 缺料兩種來源）
+- `MrpCalculationService` —— MRP 缺料試算與建議採購量
+- `PurchasingQueryService` —— 未結案採購單查詢
+- `QualityInspectionQueryService` —— 品管檢驗結果彙總
+- `PurchaseSuggestionService` —— 採購建議：AI 寫建議、人工核准才成立採購單
+- `WorkOrderDelayRiskPredictionService` —— 延遲風險：規則式與 ML 模型並陳
 
 ## 四個必須知道的計算約定
 
@@ -482,11 +478,12 @@ ollama pull bge-m3
 
 ### 技術選擇
 
-| 項目 | 選擇 | 理由 |
-|---|---|---|
-| Embedding | 本機 Ollama HTTP（`/api/embeddings`），模型 `bge-m3` | 零成本、離線可跑、不需要金鑰或雲端帳號 |
-| 向量儲存 | 既有 SQLite 的 `document_chunks`，float32 BLOB | 不必多跑一個服務；1024 維一段 4096 bytes，33 段共約 132 KB |
-| 相似度 | C# 手寫 brute-force cosine | 33 段 × 1024 維約三萬四千次乘加。實測單次查詢 19–80 ms，其中絕大部分是 embedding 的那一次往返 |
+- **Embedding**：本機 Ollama HTTP（`/api/embeddings`），模型 `bge-m3` ——
+  零成本、離線可跑、不需要金鑰或雲端帳號。
+- **向量儲存**：既有 SQLite 的 `document_chunks`，float32 BLOB ——
+  不必多跑一個服務；1024 維一段 4096 bytes，33 段共約 132 KB。
+- **相似度**：C# 手寫 brute-force cosine —— 33 段 × 1024 維約三萬四千次乘加。
+  實測單次查詢 19–80 ms，其中絕大部分是 embedding 的那一次往返。
 
 沒有引入 Qdrant／pgvector，也沒有引入 SIMD 套件。依賴增加了 —— 零個。
 
@@ -663,13 +660,11 @@ clone 下來跑 `dotnet test` 不必裝任何 Python 套件。模型檔載不起
 `ErpExceptionHandler` 把 Application 層的例外對映成語意正確的狀態碼。
 沒有這一層時，查無料號會回 500，而且回應體直接吐出完整堆疊與本機絕對路徑。
 
-| 例外 | 狀態碼 |
-|---|---|
-| `EntityNotFoundException` | 404 |
-| `ArgumentException`（含 `ArgumentOutOfRangeException`） | 400 |
-| `InvalidOperationException` | 409（參數合法但操作不適用，如對原物料問可製造量） |
-| `LlmUnavailableException` | 503 |
-| 其他 | 500，回應只有通用訊息，全文進伺服器 log |
+- `EntityNotFoundException` → **404**
+- `ArgumentException`（含 `ArgumentOutOfRangeException`）→ **400**
+- `InvalidOperationException` → **409**（參數合法但操作不適用，如對原物料問可製造量）
+- `LlmUnavailableException` → **503**
+- 其他 → **500**，回應只有通用訊息，全文進伺服器 log
 
 ## 實作時踩到的坑
 
@@ -853,10 +848,11 @@ provider 端是 `scripts/fake-openai-provider.mjs`，照問句裡的 `@@CALL <�
 
 兩個 job：
 
-| job | 做什麼 | 為什麼分開 |
-|---|---|---|
-| `build-and-test` | 格式檢查 → Release 建置（警告視為錯誤）→ 全部測試 | 快速回饋。它不需要 Ollama，那 30 個檢索品質測試在這裡是 skip |
-| `retrieval-quality` | 裝 Ollama、pull `bge-m3`、只跑 `RetrievalQualityTests` | 約 3.5 分鐘，比主 job 慢。分開之後它紅燈的原因沒有模糊空間：要嘛模型選得不對、要嘛環境沒裝起來 |
+- **`build-and-test`** —— 格式檢查 → Release 建置（警告視為錯誤）→ 全部測試。
+  維持快速回饋（實測約 1 分鐘）：它不需要 Ollama，檢索品質那組在這裡是 skip。
+- **`retrieval-quality`** —— 裝 Ollama、pull `bge-m3`、只跑 `RetrievalQualityTests`。
+  比主 job 慢得多（實測約 8 分鐘）。分開之後它紅燈的原因沒有模糊空間：
+  要嘛模型選得不對、要嘛環境沒裝起來。
 
 `retrieval-quality` 的兩個關鍵設計：
 
