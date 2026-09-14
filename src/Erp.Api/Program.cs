@@ -292,7 +292,10 @@ app.MapGet("/api/mrp/shortages", async (
     .WithSummary("MRP 缺料試算")
     .WithDescription(
         "把規劃期間內未結案工單的剩餘產量展開成原料需求，扣掉可用庫存與能及時到貨的在途採購。" +
-        "已逾期未結案的工單也會納入。suggestedOrderQty 已套用最小訂購量與訂購倍量，請直接引用。");
+        "已逾期未結案的工單也會納入；已全數發料的工單則不列入需求 —— " +
+        "那些料已經出庫、反映在帳上庫存的減少裡了，再算一次會讓缺料量偏高。" +
+        "suggestedOrderQty 已套用最小訂購量與訂購倍量，請直接引用。" +
+        "這裡回答的是「總共缺多少」；「什麼時候開始缺」請用 /api/mrp/time-phased。");
 
 app.MapGet("/api/purchase-orders/open", async (
         string? supplierCode, string? itemCode, PurchasingQueryService service, CancellationToken ct)
