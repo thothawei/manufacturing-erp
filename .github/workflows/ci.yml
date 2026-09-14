@@ -6,14 +6,25 @@ on:
   # 不限定 base 分支：限定的話，針對非 main 分支開的 PR 會靜默不跑 CI
   pull_request:
 
+# Action 版本用 major tag（@v7）而不是釘死 commit SHA。
+#
+# 釘 SHA 對供應鏈更安全 —— 一個被入侵的 action 拿得到 repo 的寫入權限。
+# 這裡不釘的取捨是：公開 repo、沒有任何 secret（CI 不需要金鑰，
+# AI 與 RAG 的測試都是離線的或自己裝 Ollama），被入侵的最壞後果是
+# 改掉這個 repo 的內容，而不是洩漏什麼。用 major tag 換到的是
+# 自動收 patch 與安全性更新，不必每次都手動追。
+#
+# 從 v4 升上來（2026-09-14）：v5 把 runtime 換成 Node 24、
+# checkout v7 擋掉 pull_request_target/workflow_run 對 fork PR 的 checkout ——
+# 這個 workflow 用的是 push 與 pull_request，不受影響。升完實跑過一輪 CI 確認。
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -48,9 +59,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
