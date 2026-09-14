@@ -44,6 +44,20 @@ fly deploy --config deploy/fly.toml --dockerfile Dockerfile
 | AI 助理 `POST /api/ai-assistant/ask` | **回 503** | 刻意不放金鑰 —— 見下 |
 | 文件檢索（RAG） | 回 `SERVICE_UNAVAILABLE` | 需要本機 Ollama，容器裡沒有 |
 
+### BaseUrl 與 Model 要成對設定
+
+`appsettings.json` 預設打的是**開發機上的 OmniRoute gateway**（`localhost:20128`），
+模型代號也跟著是 gateway 的格式（`anthropic/claude-opus-5`，帶 provider 前綴）。
+容器裡沒有那個 gateway，所以部署設定把兩個都改回官方端點的寫法。
+
+只清 `BaseUrl` 不夠：官方端點不認得帶前綴的模型代號，有人在展示站設了金鑰
+就會因為模型名稱失敗。實測確認過啟動 log 會印出生效的組合：
+
+```
+AI 助理設定：模型 claude-opus-5，端點 Anthropic 官方，工具迴圈上限 5 輪，逾時 60 秒，
+API 金鑰來源：未設定（將交由 SDK 自行解析憑證，若無憑證會回 503）
+```
+
 ### 為什麼公開展示站不放 Anthropic 金鑰
 
 放上去等於把金鑰交給所有能打這個網址的人：每一次請求都花你的錢，

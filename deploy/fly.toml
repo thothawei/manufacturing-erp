@@ -16,6 +16,10 @@ primary_region = "nrt"          # 東京，離台灣最近的常用區域
 [env]
   ASPNETCORE_ENVIRONMENT = "Demo"
   ConnectionStrings__ErpDatabase = "Data Source=/tmp/erp.db"
+  # BaseUrl 與 Model 要成對改回官方端點的寫法：appsettings.json 預設打
+  # 開發機的 OmniRoute gateway，模型代號也是它的格式（帶 provider 前綴）
+  AiAssistant__BaseUrl = ""
+  AiAssistant__Model = "claude-opus-5"
   # 同樣刻意不設金鑰，理由見 deploy/render.yaml
 
 [http_service]

@@ -13,8 +13,10 @@ dotnet build --no-restore --configuration Release -warnaserror
 dotnet test --no-build --configuration Release
 ```
 
-**整條跑完 25–30 秒**（實測：restore 9 秒、format 16 秒、build 12 秒、test 10 秒，258 個測試）。
-這四步是快的，直接在前景跑完看結果，不要丟到背景再自己輪詢。
+**整條跑完約 60 秒**（2026-09-14 實測：restore 2 秒、format 10 秒、build 3 秒、
+test 43 秒，397 個測試通過 + 3 個 skip）。測試那段變慢是因為檢索品質那組
+會接真實 Ollama 跑 30 個案例 —— 本機沒裝 Ollama 的話會快很多。
+這四步都是前景跑得完的，不要丟到背景再自己輪詢。
 
 端到端驗證（會真的跑起 ERP + OmniRoute + stub provider，不在 CI 裡）：
 

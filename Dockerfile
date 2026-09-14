@@ -39,8 +39,19 @@ COPY --from=build --chown=erp:erp /app/publish ./
 
 # SQLite 檔放在容器內，每次啟動重建展示資料。
 # 免費方案多半沒有持久卷，而這裡正好不需要 —— 展示資料本來就該是乾淨的。
+# BaseUrl 與 Model 必須成對設定，這裡兩個都要覆寫。
+#
+# appsettings.json 預設打本機的 OmniRoute gateway（開發機上跑得起來），
+# 模型代號也跟著是 gateway 的格式 anthropic/claude-opus-5。容器裡沒有那個
+# gateway，所以 BaseUrl 清空改打官方端點 —— 但只清 BaseUrl 不夠：
+# 官方端點不認得帶 provider 前綴的模型代號，有人在展示站設了金鑰就會失敗。
+#
+# 不清 BaseUrl 的話還有另一個問題：AI 端點的 503 會變成「連不上 gateway」
+# 而不是「沒有設定金鑰」，而首頁導覽說的是後者，訊息對不上就成了誤導。
 ENV ConnectionStrings__ErpDatabase="Data Source=/tmp/erp.db" \
     ASPNETCORE_ENVIRONMENT=Demo \
+    AiAssistant__BaseUrl="" \
+    AiAssistant__Model="claude-opus-5" \
     DOTNET_gcServer=0
 
 # PORT 由平台注入（Render、Railway 都是這個慣例）；沒有時退回 8080
