@@ -17,25 +17,38 @@ namespace Erp.Api.Tests;
 ///
 /// AI 助理的 BaseUrl 指向一個沒有服務在聽的埠 —— 這樣測 AI 端點的錯誤路徑時
 /// 會走到連線失敗，不會真的打 Anthropic API（不花錢、不依賴網路）。
-public sealed class ErpApiFactory : WebApplicationFactory<Program>
+public class ErpApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _databasePath =
         Path.Combine(Path.GetTempPath(), $"erp-api-test-{Guid.NewGuid():N}.db");
 
+    /// 線上展示站跑的是 Demo 而不是 Development。
+    /// 兩者行為應該一致（開放 Scalar、啟動時灌展示資料），而那件事需要被驗證 ——
+    /// 部署上去才發現 Scalar 沒開、或資料表是空的，是最晚才會發現的失敗。
+    protected virtual string Environment => "Development";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Development");
+        builder.UseEnvironment(Environment);
 
-        builder.ConfigureAppConfiguration((_, config) =>
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:ErpDatabase"] = $"Data Source={_databasePath}",
-                ["AiAssistant:ApiKey"] = "sk-ant-not-a-real-key-for-tests",
-                ["AiAssistant:BaseUrl"] = "http://localhost:1",   // 沒有服務在聽
-                ["AiAssistant:TimeoutSeconds"] = "5",
-                ["Rag:OllamaBaseUrl"] = "http://localhost:1",     // 沒有服務在聽
-                ["Rag:TimeoutSeconds"] = "2"
-            }));
+        // 用 UseSetting 而不是 ConfigureAppConfiguration.AddInMemoryCollection：
+        // 後者加進去的來源會被之後載入的 appsettings.{Environment}.json 蓋掉，
+        // 而那個失敗完全沒有症狀 —— 測試照樣全綠，只是全部共用
+        // bin/ 底下那個相對路徑的 erp.db，連跨天殘留的舊種子資料都一起繼承。
+        // （這個 bug 真的發生過：2026-09-14 的測試讀到的是 09-10 灌的工單。）
+        // UseSetting 寫的是 host configuration，優先級高於任何 appsettings 檔案。
+        foreach (var (key, value) in new Dictionary<string, string>
+        {
+            ["ConnectionStrings:ErpDatabase"] = $"Data Source={_databasePath}",
+            ["AiAssistant:ApiKey"] = "sk-ant-not-a-real-key-for-tests",
+            ["AiAssistant:BaseUrl"] = "http://localhost:1",   // 沒有服務在聽
+            ["AiAssistant:TimeoutSeconds"] = "5",
+            ["Rag:OllamaBaseUrl"] = "http://localhost:1",     // 沒有服務在聽
+            ["Rag:TimeoutSeconds"] = "2"
+        })
+        {
+            builder.UseSetting(key, value);
+        }
     }
 
     protected override void Dispose(bool disposing)

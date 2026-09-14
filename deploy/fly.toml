@@ -1,0 +1,37 @@
+# Fly.io 部署設定（備選方案）。
+#
+# 與 Render 的差別：Fly 不會休眠（回應快），但免費額度需要綁信用卡。
+# 兩者用的是同一份 Dockerfile。
+#
+# 用法：
+#   fly launch --no-deploy --copy-config --config deploy/fly.toml
+#   fly deploy --config deploy/fly.toml --dockerfile Dockerfile
+
+app = "manufacturing-erp-demo"
+primary_region = "nrt"          # 東京，離台灣最近的常用區域
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Demo"
+  ConnectionStrings__ErpDatabase = "Data Source=/tmp/erp.db"
+  # 同樣刻意不設金鑰，理由見 deploy/render.yaml
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 沒有流量時停機、有請求時自動叫醒。省額度，代價是冷啟動延遲
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.checks]
+    [[http_service.checks.http]]
+      path = "/health"
+      interval = "30s"
+      timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

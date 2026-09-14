@@ -1,0 +1,19 @@
+# 建置產物與本機狀態：複製進 context 只會拖慢 build，而且可能把
+# 本機的 obj/ 帶進容器造成難查的建置錯誤
+**/bin/
+**/obj/
+.git/
+.vs/
+.idea/
+*.db
+*.db-shm
+*.db-wal
+
+# 訓練環境（369 MB）。推論不需要 Python，模型以 ONNX 進 repo
+ml/.venv/
+
+# 測試、工具與文件都不進執行階段的映像
+tests/
+tools/
+docs/
+*.md

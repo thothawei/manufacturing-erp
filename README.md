@@ -21,13 +21,29 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十五個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-387 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 417；
+394 個測試，0 警告（本機裝了 Ollama 時多跑 30 個檢索品質測試，共 424；
 另有 3 個接真實 Anthropic API 的測試，沒金鑰時 skip）。
 **唯一未驗證的環節**：`AnthropicLlmClient` 從未對真實 Anthropic API
 發過請求（開發機沒有金鑰），送出的 HTTP 請求內容已用本機假伺服器逐欄檢查。
 這件事現在有一組隨時可跑的測試在等金鑰 —— 見「真實 API 驗證怎麼跑」。
 RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那一輪實測換掉了預設模型，
 見「為什麼不是 nomic-embed-text」。
+
+### 想自己點點看
+
+一份 `Dockerfile` 就能把展示站跑起來（Render / Fly.io 的設定檔在
+[`deploy/`](deploy/)，含逐步說明）：
+
+```bash
+docker build -t erp-demo . && docker run --rm -p 8088:8080 erp-demo
+```
+
+然後開 <http://localhost:8088/>（導覽）或 <http://localhost:8088/scalar/v1>（互動文件）。
+展示資料每次啟動重建，隨便打不會弄壞任何東西。
+
+部署到公開網址之後，把連結補在這裡。**AI 助理端點在公開展示站上會回 503 ——
+那是刻意的**：把 Anthropic 金鑰放在公開網址上，等於每一次請求都花錢而且擋不住任何人
+（理由與該補的防護寫在 [`deploy/README.md`](deploy/README.md)）。
 
 | 想看什麼 | 去哪裡 |
 |---|---|
@@ -681,6 +697,19 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 「門檻有沒有被套用」，驗不了「門檻值有沒有意義」。這種缺口只有真的跑一次才會現形，
 而它原本被寫在 README 的「尚未處理」裡當成一條可以接受的已知限制。
 
+**測試設定被 appsettings 蓋掉，而且完全沒有症狀**（做線上展示站時踩到）：
+`ErpApiFactory` 用 `ConfigureAppConfiguration.AddInMemoryCollection` 指定測試用的
+連線字串，但 `Program.cs` 在 `builder.Build()` 之前就把連線字串讀走了 ——
+那時工廠的設定還沒注入。結果是所有測試類別共用 `bin/` 底下那個相對路徑的 `erp.db`，
+連跨天殘留的舊種子資料都一起繼承（實際被咬到的樣子：2026-09-14 跑的測試讀到 09-10 灌的工單）。
+工廠註解宣稱的「每個測試類別一個獨立 SQLite 檔」那時已經很久沒有成立過，
+**而且沒有任何一條測試會紅**。改用 `UseSetting`（寫 host configuration，優先級最高）。
+
+這個坑還有第二層：補上的防線測試第一版讀的是 `IConfiguration`，
+在壞掉的版本上照樣是綠的 —— 因為設定表裡確實有那個值，只是 `Program.cs` 讀得太早。
+要驗的是 `DbContext.Database.GetConnectionString()`，也就是**真正連到哪個檔案**。
+是反向驗證抓到測試驗錯了層級。
+
 **一致性測試會被新工具反咬**（做 RAG 時踩到）：`ToolCatalogConsistencyTests` 會走訪每個工具
 並斷言它不回錯誤，而 CI 上沒有 Ollama —— 檢索那個工具必然讓那兩條 Theory 變紅。
 這讓 `IEmbeddingClient` 從「將來換供應商」的裝飾性抽象變成**必需品**：
@@ -701,14 +730,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-387 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
-（沒有時標記為 skip），跑起來共 417 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
+394 個測試，分四個專案。另有 30 個檢索品質測試只在本機有 Ollama 時執行
+（沒有時標記為 skip），跑起來共 424 個；接真實 Anthropic API 的 2 個測試沒金鑰時同樣 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 93 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
 | `Erp.Infrastructure.Tests` | 254（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
-| `Erp.Api.Tests` | 28 | HTTP 端點的錯誤對映與正常路徑、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Api.Tests` | 35 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 幾個值得一提的：

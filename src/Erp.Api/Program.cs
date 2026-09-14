@@ -53,7 +53,7 @@ builder.Services.AddOpenApi(options =>
         document.Info.Description =
             "Clean Architecture 分層的製造業 ERP。\n\n"
             + "除了一般的查詢端點，另有一個以 tool-use 驅動的 AI 助理："
-            + "使用者用自然語言提問，AI 透過十一個工具查詢系統資料後回答，"
+            + "使用者用自然語言提問，AI 透過十二個工具查詢系統資料後回答，"
             + "所有數字都由後端算好，LLM 不做任何計算。\n\n"
             + "**兩個容易答錯的地方**：可行性判斷一律以可用庫存（帳上減已保留）為準；"
             + "多階 BOM 的用量以最終成品一個單位為分母，中間階已逐層累乘。";
@@ -67,8 +67,17 @@ var app = builder.Build();
 
 app.UseExceptionHandler();
 
-// 互動式 API 文件。只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
-if (app.Environment.IsDevelopment())
+// 線上展示用的環境。
+//
+// 它與 Development 做同樣的兩件事（開放 Scalar、啟動時自動建表並灌展示資料），
+// 但**刻意是一個獨立的名字**：正式環境不該有這兩者，而「demo 站需要它們」
+// 與「開發機需要它們」是兩個不同的理由。合併成 IsDevelopment 的話，
+// 日後要改其中一邊的行為就會連帶改到另一邊。
+var isPublicDemo = app.Environment.IsEnvironment("Demo");
+var showcaseMode = app.Environment.IsDevelopment() || isPublicDemo;
+
+// 互動式 API 文件。只在開發與展示環境開放 —— 正式環境不需要把端點結構公開出去。
+if (showcaseMode)
 {
     app.MapOpenApi();
     app.MapScalarApiReference(options => options
@@ -76,9 +85,9 @@ if (app.Environment.IsDevelopment())
         .WithTheme(ScalarTheme.BluePlanet));
 }
 
-// 開發環境自動建表並灌入展示資料；正式環境應改為明確的部署步驟
+// 開發與展示環境自動建表並灌入展示資料；正式環境應改為明確的部署步驟
 var ragChunkCount = 0;
-if (app.Environment.IsDevelopment())
+if (showcaseMode)
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ErpDbContext>();
@@ -106,6 +115,40 @@ app.Logger.LogInformation(
     ragChunkCount == 0
         ? $"（索引未建立：需要本機 Ollama 並執行 ollama pull {ragOptions.EmbeddingModel}；其他八個工具不受影響）"
         : string.Empty);
+
+// 展示站的首頁。
+//
+// 沒有它的話，訪客打開網址看到的是 404 —— 對一個「線上可試用」的連結來說
+// 那是最糟的第一印象。這裡不做 HTML 頁面，回一份 JSON 導覽：
+// 說清楚這是什麼、哪些端點可以直接點、以及哪些功能在這個環境下不會動、為什麼。
+if (showcaseMode)
+{
+    app.MapGet("/", (IOptions<AiAssistantOptions> ai) => Results.Ok(new
+    {
+        name = "製造業 ERP + AI 助理（線上展示）",
+        source = "https://github.com/thothawei/manufacturing-erp",
+        interactiveDocs = "/scalar/v1",
+        note = "展示資料在每次啟動時重建，隨便打不會弄壞任何東西。",
+        tryThese = new[]
+        {
+            "/api/items/PANEL-01/inventory   可用庫存 vs 帳上庫存",
+            "/api/items/TV-100/sufficiency   多階 BOM 展開，最多能做幾台",
+            "/api/work-orders/at-risk        風險工單（逾期與缺料兩種來源）",
+            "/api/mrp/shortages              MRP 缺料與建議採購量",
+            "/api/mrp/time-phased            時間分期：第幾週開始缺",
+            "/api/work-orders/{no}/delay-risk 規則式與 ML 模型並陳的延遲風險"
+        },
+        notAvailableHere = new[]
+        {
+            string.IsNullOrWhiteSpace(ai.Value.ApiKey)
+                ? "POST /api/ai-assistant/ask —— 沒有設定 Anthropic 金鑰，會回 503。公開展示站刻意不放金鑰。"
+                : "POST /api/ai-assistant/ask —— 已設定金鑰。",
+            "search_documents（RAG）—— 需要本機 Ollama，容器裡沒有，會回 SERVICE_UNAVAILABLE。"
+        }
+    }))
+    .WithSummary("展示站導覽")
+    .WithDescription("線上展示環境的首頁：可以直接點的端點、以及這個環境下不會動的功能與原因。");
+}
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .WithSummary("健康檢查")

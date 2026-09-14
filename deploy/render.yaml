@@ -1,0 +1,28 @@
+# Render Blueprint（免費方案）。
+#
+# 用法：在 Render 建立 Blueprint、指向這個 repo，它會讀這個檔把服務開起來。
+# 免費方案的兩個限制要先知道：
+#   1. 15 分鐘沒有流量就休眠，下一次請求要等冷啟動（實測約 40–60 秒）。
+#   2. 沒有持久磁碟。這裡剛好不需要 —— SQLite 建在容器裡，
+#      展示資料每次啟動重建，本來就該是乾淨的。
+#
+# 選 Render 而不是 Fly.io 的理由：免費方案不必綁信用卡。
+# 會休眠是缺點，但對「履歷上的一個連結」來說，比「忘記關機被扣錢」好。
+services:
+  - type: web
+    name: manufacturing-erp-demo
+    runtime: docker
+    plan: free
+    region: singapore          # 離台灣最近的區域
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false          # 展示站不需要每次 push 都重新部署
+    envVars:
+      # Demo 環境會開放 Scalar 並在啟動時建表、灌展示資料。
+      # 正式環境不該有這兩者 —— 它是一個獨立的環境名稱，不是 Development 的別名。
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Demo
+      - key: ConnectionStrings__ErpDatabase
+        value: Data Source=/tmp/erp.db
+      # 刻意不設 AiAssistant__ApiKey：公開展示站上放金鑰等於把它交給所有人。
+      # AI 助理端點會回 503 並說明原因，那是誠實的行為，不是故障。
