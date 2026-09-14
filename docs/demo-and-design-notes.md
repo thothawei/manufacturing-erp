@@ -295,7 +295,7 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: applic
 ### 3.6c 可寫入工具：AI 提建議，人按核准
 
 ```bash
-# AI 端：產生建議。狀態是 PendingApproval，沒有任何採購單成立
+# AI 端：產生 PendingApproval 的建議，沒有採購單成立
 curl -X POST http://localhost:5199/api/ai-assistant/ask -H 'Content-Type: application/json' \
   -d '{"question":"缺料的部分幫我開採購建議"}'
 

@@ -228,7 +228,7 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask \
 **狀態為「待人工確認」的採購建議**，不是採購單：
 
 ```bash
-# AI 端：產生建議（狀態 PendingApproval，沒有任何採購單成立）
+# AI 端：產生 PendingApproval 的建議，沒有採購單成立
 curl -X POST http://localhost:5199/api/ai-assistant/ask \
   -H 'Content-Type: application/json' \
   -d '{"question":"缺料的部分幫我開採購建議"}'
@@ -358,7 +358,8 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask \
 接**正式端點**跑完整條 tool-use 迴圈。設好金鑰後：
 
 ```bash
-dotnet test tests/Erp.Infrastructure.Tests --filter "FullyQualifiedName~AnthropicLive"
+dotnet test tests/Erp.Infrastructure.Tests \
+  --filter "FullyQualifiedName~AnthropicLive"
 ```
 
 沒金鑰時整組 skip（所以預設不會讓任何人的 `dotnet test` 紅掉、也不會花到錢）。
