@@ -335,19 +335,20 @@ curl -X POST http://localhost:5199/api/ai-assistant/ask \
   -d '{"question":"面板色偏的判定標準是什麼？以前有發生過批量客訴嗎？"}'
 ```
 
-LLM 會呼叫 `search_documents(query="面板色偏的判定標準是什麼", top_k=2)`，後端回的是這個：
+LLM 會呼叫 `search_documents(query="面板色偏的判定標準是什麼", top_k=2)`，後端回的是這個
+（`text` 欄位為了版面截短了，實際回傳的是完整段落）：
 
 ```json
 {
   "chunks": [
     {
-      "text": "適用範圍：TV-100 與 MON-200 系列在面板點燈檢驗站（IPQC-02）發現色偏時的判定與處置。\n色偏定義為在標準光源下，畫面白平衡偏離規格中心值超過允收範圍，肉眼可辨明顯偏藍、\n偏黃或偏綠。本規範不適用於亮度不足、亮點暗點或漏光，那三類走「面板外觀不良」處理。",
+      "text": "適用範圍：TV-100 與 MON-200 系列在面板點燈檢驗站（IPQC-02）發現色偏時的判定與處置。\n色偏定義為……（略）",
       "source_name": "品管異常處理 SOP — 面板色偏",
       "chunk_index": 0,
       "similarity": 0.7672788973169793
     },
     {
-      "text": "判定方式：將待判面板置入標準光源箱，色溫固定 6500K，環境照度控制在 50 lux 以下。\n以色彩分析儀量測畫面中央與四角共五點，取色座標平均值。允收標準為 x、y 座標與\n規格中心值的偏差各在 ±0.006 以內，且五點之間的最大差異不超過 0.010。\n超出任一條件即判定為色偏不良，不可用目視結果覆蓋儀器數據。",
+      "text": "判定方式：將待判面板置入標準光源箱，色溫固定 6500K，環境照度控制在 50 lux 以下。\n以色彩分析儀量測……（略）",
       "source_name": "品管異常處理 SOP — 面板色偏",
       "chunk_index": 1,
       "similarity": 0.7645242613616358
@@ -372,13 +373,21 @@ LLM 會呼叫 `search_documents(query="面板色偏的判定標準是什麼", to
 查無資料是正常結果。問「今天天氣如何」時實測回的就是這個（33 段全部低於門檻）：
 
 ```json
-{"chunks":[],"similarity_threshold":0.5,"matched_count":0,"note":"沒有找到相似度達到門檻的段落，語料中可能沒有這個主題。"}
+{
+  "chunks": [],
+  "similarity_threshold": 0.5,
+  "matched_count": 0,
+  "note": "沒有找到相似度達到門檻的段落，語料中可能沒有這個主題。"
+}
 ```
 
 但「索引根本沒建起來」是另一回事，那回的是錯誤：
 
 ```json
-{"error_code":"SERVICE_UNAVAILABLE","message":"無法連線到 Ollama（http://localhost:11434）。文件語意檢索需要本機的 Ollama 服務，請確認它已啟動。"}
+{
+  "error_code": "SERVICE_UNAVAILABLE",
+  "message": "無法連線到 Ollama（http://localhost:11434）。文件語意檢索需要本機的 Ollama 服務，請確認它已啟動。"
+}
 ```
 
 把這兩種混為一談，使用者會以為文件裡真的沒寫那件事。
@@ -403,9 +412,14 @@ curl "http://localhost:5199/api/mrp/shortages?planningHorizonDays=0"
 ```
 
 ```json
-{"title":"查無資料","status":404,"detail":"找不到料件：NOT-EXIST"}
-{"title":"無法執行此操作","status":409,"detail":"料件 PANEL-01 沒有 BOM，無法計算可製造量"}
-{"title":"參數錯誤","status":400,"detail":"規劃期間必須大於 0 天 (Parameter 'planningHorizonDays')"}
+{"title": "查無資料", "status": 404,
+ "detail": "找不到料件：NOT-EXIST"}
+
+{"title": "無法執行此操作", "status": 409,
+ "detail": "料件 PANEL-01 沒有 BOM，無法計算可製造量"}
+
+{"title": "參數錯誤", "status": 400,
+ "detail": "規劃期間必須大於 0 天 (Parameter 'planningHorizonDays')"}
 ```
 
 **看點**：第二個是 409 而不是 404 —— PANEL-01 **存在**，只是它是原物料沒有 BOM，
