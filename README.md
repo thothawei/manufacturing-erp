@@ -802,6 +802,24 @@ provider 端是 `scripts/fake-openai-provider.mjs`，照問句裡的 `@@CALL <�
 吐出指定的 tool_call —— 要驗的是路徑與轉譯，不是模型答得好不好，
 所以 provider 必須可重複、不花錢。需要跑起真的 ERP 與 gateway，因此不放進 CI。
 
+### 展示圖怎麼重新產生
+
+```bash
+omniroute                          # 另一個終端機
+./scripts/demo-ai-screenshot.sh    # 重新產生 docs/images/resume-ai-assistant.png
+```
+
+![AI 助理問答](docs/images/resume-ai-assistant.png)
+
+四組問答是腳本當場打 `/api/ai-assistant/ask` 拿到的，工具名稱與耗時從 ERP 的稽核
+log 解析出來 —— **圖上沒有寫死的數字**，展示資料變了重跑一次圖就跟著變。
+
+provider 端是 `scripts/demo-nl-provider.mjs`，跟上面那支的差別只在「怎麼決定要叫哪個
+工具」：e2e 那支要問句明寫 `@@CALL` 指令（為了可重複斷言），這支改成看中文關鍵字
+（為了讓畫面就是「問一句話，它自己查完回答」）。**用這張圖的時候要照實說**：
+工具呼叫、資料庫查詢、每個數字都是真的，但「挑哪個工具」與「把數字寫成句子」
+是規則寫的，不是模型想的。接真模型時這兩件事改由模型做，中間的工具與資料層一行都不用動。
+
 幾個值得一提的：
 
 - **`ToolCatalogConsistencyTests`** — 工具的 JSON Schema 是手寫的，`ToolDispatcher` 用字串
