@@ -7,7 +7,10 @@ namespace Erp.Application.Tests.Fakes;
 /// （DelayRiskModelTests 用的是 repo 裡真正的模型，不是假的）。
 ///
 /// 這個假模型把收到的特徵留下來，讓測試可以逐欄檢查。
-public sealed class FakeDelayRiskModel(bool available = true, double probability = 0.42) : IDelayRiskModel
+public sealed class FakeDelayRiskModel(
+    bool available = true,
+    double probability = 0.42,
+    IReadOnlyList<OutOfDistributionFeature>? outOfDistribution = null) : IDelayRiskModel
 {
     public WorkOrderDelayFeatures? LastFeatures { get; private set; }
 
@@ -16,6 +19,8 @@ public sealed class FakeDelayRiskModel(bool available = true, double probability
     public string Description => IsAvailable ? "假模型（測試用）" : "沒有模型檔（測試用）";
 
     public double DecisionThreshold => 0.26;
+
+    public bool IsCalibrated => false;
 
     public double PredictDelayProbability(WorkOrderDelayFeatures features)
     {
@@ -27,4 +32,7 @@ public sealed class FakeDelayRiskModel(bool available = true, double probability
         LastFeatures = features;
         return probability;
     }
+
+    public IReadOnlyList<OutOfDistributionFeature> FindOutOfDistributionFeatures(
+        WorkOrderDelayFeatures features) => outOfDistribution ?? [];
 }

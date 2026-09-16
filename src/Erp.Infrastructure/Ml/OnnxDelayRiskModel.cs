@@ -14,7 +14,27 @@ public sealed record DelayRiskModelMetadata(
     int RowsTotal,
     IReadOnlyList<string> Features,
     DelayRiskModelMetrics Metrics,
+    DelayRiskCalibration? Calibration,
+    IReadOnlyDictionary<string, FeatureRange>? FeatureRanges,
     IReadOnlyList<GoldenSample> GoldenSamples);
+
+/// 訓練時對「要不要做機率校準」的評估結果。
+///
+/// Applied 是 null 代表評估過但不採用 —— 那不是漏做，是有數字支持的決定，
+/// 理由在 Decision 裡。訓練腳本用 bootstrap 算 ΔBrier 的 95% 區間，
+/// 跨 0 就代表這批測試資料分不出校準前後的差別。
+public sealed record DelayRiskCalibration(
+    UncalibratedScores Uncalibrated,
+    string? Applied,
+    string Decision);
+
+public sealed record UncalibratedScores(double Brier, double Ece);
+
+/// 某個特徵在訓練資料裡的分布範圍。
+///
+/// 線上用 P1/P99 判斷分布外，而不是 Min/Max：後者被單一一筆極端值決定，
+/// 只要線上有一張工單稍微超過那一筆，就會整批被標成分布外。
+public sealed record FeatureRange(double P1, double P99, double Min, double Max);
 
 /// 訓練時 sklearn 對這組輸入算出來的機率。
 ///
@@ -101,6 +121,12 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
     /// 但也代表「不對稱代價」那件事沒有被反映，所以 Description 會講明沒有 metadata。
     public double DecisionThreshold => Metadata?.Metrics.Threshold ?? 0.5;
 
+    /// 目前是 false，而且那是有數字支持的決定而不是漏做：
+    /// 訓練時跑過 Platt 與 isotonic，兩者 ΔBrier 的 95% bootstrap 區間都跨 0，
+    /// 也就是這批測試資料分不出校準前後的差別。採用一個分不出差別的轉換，
+    /// 只是多一層沒有證據支持的加工。詳見 metadata 的 calibration.decision。
+    public bool IsCalibrated => Metadata?.Calibration?.Applied is not null;
+
     public double PredictDelayProbability(WorkOrderDelayFeatures features)
     {
         if (_session is null)
@@ -121,6 +147,47 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
             .AsTensor<float>();
 
         return probabilities[0, 1];
+    }
+
+    /// 分布外檢查。
+    ///
+    /// 這是模型最危險的失敗方式：對沒見過的輸入它照樣給一個機率，
+    /// 數字的外觀與分布內的完全一樣，只是可信度低 —— 而且不會有任何徵兆。
+    /// 展示資料的 weekly_load_ratio 是 0.125，訓練資料的下界是 0.5088，
+    /// 這個檢查就是為了讓那件事在回應裡看得見。
+    public IReadOnlyList<OutOfDistributionFeature> FindOutOfDistributionFeatures(
+        WorkOrderDelayFeatures features)
+    {
+        if (Metadata?.FeatureRanges is not { Count: > 0 } ranges)
+        {
+            return [];   // 沒有邊界資料就無從判斷，不要猜
+        }
+
+        var values = features.ToVector();
+        var names = WorkOrderDelayFeatures.FeatureNames;
+        var outOfRange = new List<OutOfDistributionFeature>();
+
+        for (var i = 0; i < names.Count && i < values.Length; i++)
+        {
+            if (!ranges.TryGetValue(names[i], out var range))
+            {
+                continue;
+            }
+
+            // 容差不是小心過頭，是必要的：特徵向量是 float32（ONNX 吃的型別），
+            // 邊界是 metadata 裡的 double。訓練集裡值剛好等於邊界的樣本，
+            // 轉成 float 之後會變成 0.11999999731779099 這種數字，
+            // 直接比大小就會把它判成分布外 —— 這是測試抓到的，不是預想出來的。
+            var tolerance = Math.Max(1e-6, (range.P99 - range.P1) * 1e-6);
+
+            if (values[i] < range.P1 - tolerance || values[i] > range.P99 + tolerance)
+            {
+                outOfRange.Add(new OutOfDistributionFeature(
+                    names[i], values[i], range.P1, range.P99));
+            }
+        }
+
+        return outOfRange;
     }
 
     public void Dispose() => _session?.Dispose();

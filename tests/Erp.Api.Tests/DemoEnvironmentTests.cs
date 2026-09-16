@@ -83,4 +83,24 @@ public class DemoEnvironmentTests(DemoApiFactory factory) : IClassFixture<DemoAp
         Assert.True(body.GetProperty("predictedDelayProbability").ValueKind != JsonValueKind.Null,
             "模型沒有載起來 —— 檢查 ONNX 檔案有沒有跟著發佈輸出走");
     }
+
+    [Fact]
+    public async Task 展示工單的分布外特徵會誠實出現在回應裡()
+    {
+        // 展示資料只有四張工單，weekly_load_ratio 算出來是 0.125，
+        // 而訓練資料的下界是 0.5 —— 也就是說**展示站上看到的每一個機率，
+        // 都是模型對沒見過的輸入給出來的**。這件事必須在回應裡看得見，
+        // 而不是只寫在文件的已知限制裡。
+        var atRisk = await Client.GetFromJsonAsync<JsonElement>("/api/work-orders/at-risk");
+        var workOrderNo = atRisk.EnumerateArray().First().GetProperty("workOrderNo").GetString();
+
+        var body = await Client.GetFromJsonAsync<JsonElement>(
+            $"/api/work-orders/{workOrderNo}/delay-risk");
+
+        var outOfDistribution = body.GetProperty("outOfDistributionFeatures").EnumerateArray().ToList();
+
+        Assert.Contains(outOfDistribution,
+            f => f.GetProperty("feature").GetString() == "weekly_load_ratio");
+        Assert.Contains("分布之外", body.GetProperty("note").GetString()!);
+    }
 }

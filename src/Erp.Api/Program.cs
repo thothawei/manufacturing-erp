@@ -199,7 +199,11 @@ app.MapGet("/api/work-orders/{workOrderNo}/delay-risk", async (
         "（抓得到組合關聯，但說不出理由），讓兩者可以對照。" +
         "模型是離線訓練的 logistic regression，以 ONNX 格式載入；" +
         "**訓練資料是模擬的，不是真實產線資料**。" +
-        "機率是排序用的參考值，不是「一定會延遲」。" +
+        "機率是排序用的參考值，不是「一定會延遲」——" +
+        "它沒有經過校準（訓練時評估過 Platt 與 isotonic，數字不支持採用），" +
+        "所以 0.68 代表「比 0.42 更值得先看」，不代表「六成八會延遲」。" +
+        "outOfDistributionFeatures 會列出落在訓練資料分布之外的特徵：" +
+        "模型對這種輸入照樣給得出機率，但可信度較低。" +
         "模型檔不存在時 predictedDelayProbability 為 null，規則式判斷照常可用。");
 
 // 採購建議的人工確認流程。

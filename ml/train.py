@@ -24,9 +24,12 @@ import numpy as np
 import pandas as pd
 from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
+from sklearn.base import clone
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (average_precision_score, confusion_matrix,
-                             precision_recall_fscore_support, roc_auc_score)
+from sklearn.metrics import (average_precision_score, brier_score_loss,
+                             confusion_matrix, precision_recall_fscore_support,
+                             roc_auc_score)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -53,6 +56,15 @@ RANDOM_STATE = 20260913
 # 誤報（false positive）的代價只是生管多看一眼。兩者不對稱，
 # 所以決策閾值不用預設的 0.5，改成「在 recall 至少這麼高的前提下，precision 最好的那個」。
 TARGET_RECALL = 0.85
+
+# 校準評估的 bootstrap 重抽次數。用區間而不是單一數字來判斷「校準有沒有用」，
+# 理由見 evaluate_calibration。
+CALIBRATION_BOOTSTRAP = 2000
+
+# 分布邊界取 p1/p99 而不是 min/max：後者被單一一筆極端值決定，
+# 線上只要有一張工單稍微超過那筆，就會整批被標成分布外。
+DISTRIBUTION_LOW_PERCENTILE = 1
+DISTRIBUTION_HIGH_PERCENTILE = 99
 
 
 def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -113,6 +125,115 @@ def pick_threshold(y_true, probabilities) -> tuple[float, dict]:
     return best
 
 
+def reliability_bins(y_true, probabilities, bins: int = 10) -> tuple[float, list]:
+    """把預測機率分箱，比對「模型說幾成」與「實際幾成」，並算 ECE。
+
+    ECE（expected calibration error）是各箱「預測平均 − 實際比例」的加權平均絕對值。
+    它回答的是「0.7 這個數字真的代表七成嗎」，與 AUC 無關 ——
+    AUC 只看排序，把所有機率開根號 AUC 一模一樣，但校準全毀。
+    """
+    edges = np.linspace(0, 1, bins + 1)
+    rows = []
+    error = 0.0
+
+    for low, high in zip(edges[:-1], edges[1:]):
+        in_bin = (probabilities >= low) & (probabilities < high if high < 1 else probabilities <= high)
+        count = int(in_bin.sum())
+
+        if count == 0:
+            continue
+
+        predicted_mean = float(probabilities[in_bin].mean())
+        actual_rate = float(y_true[in_bin].mean())
+        error += count / len(probabilities) * abs(predicted_mean - actual_rate)
+
+        rows.append({
+            "range": f"{low:.1f}-{high:.1f}",
+            "count": count,
+            "predicted_mean": round(predicted_mean, 4),
+            "actual_rate": round(actual_rate, 4),
+        })
+
+    return error, rows
+
+
+def evaluate_calibration(base_model, x_train, y_train, x_test, y_test, probabilities) -> dict:
+    """校準值不值得做 —— 用數字回答，不用直覺。
+
+    logistic regression 最佳化的就是 log loss，輸出本來就接近校準過的機率，
+    所以先驗上「不需要校準」是合理的猜測。但猜測不算數，所以這裡真的跑一次
+    Platt（sigmoid）與 isotonic，把三組數字並列。
+
+    判準刻意不是「改善超過百分之幾」那種拍腦袋的門檻，而是
+    **bootstrap 重抽測試集算 ΔBrier 的 95% 區間，跨 0 就代表這 300 筆資料分不出差別**。
+    分不出差別時採用校準，等於多一層沒有證據支持的轉換，還多一個要維護的東西。
+    """
+    brier_base = float(brier_score_loss(y_test, probabilities))
+    ece_base, bins = reliability_bins(y_test, probabilities)
+
+    rng = np.random.default_rng(RANDOM_STATE)
+    candidates = {}
+
+    for method in ("sigmoid", "isotonic"):
+        calibrated = CalibratedClassifierCV(clone(base_model), method=method, cv=5)
+        calibrated.fit(x_train, y_train)
+        calibrated_probabilities = calibrated.predict_proba(x_test)[:, 1]
+
+        brier = float(brier_score_loss(y_test, calibrated_probabilities))
+        ece, _ = reliability_bins(y_test, calibrated_probabilities)
+
+        deltas = np.empty(CALIBRATION_BOOTSTRAP)
+        for i in range(CALIBRATION_BOOTSTRAP):
+            sample = rng.integers(0, len(y_test), len(y_test))
+            deltas[i] = (brier_score_loss(y_test[sample], calibrated_probabilities[sample])
+                         - brier_score_loss(y_test[sample], probabilities[sample]))
+
+        low, high = (float(v) for v in np.percentile(deltas, [2.5, 97.5]))
+
+        candidates[method] = {
+            "brier": round(brier, 5),
+            "ece": round(ece, 5),
+            "delta_brier_median": round(float(np.median(deltas)), 5),
+            "delta_brier_ci95": [round(low, 5), round(high, 5)],
+            # 區間整段在 0 以下才算「真的比較好」（Brier 越小越好）
+            "significantly_better": bool(high < 0),
+        }
+
+    applied = next((m for m, r in candidates.items() if r["significantly_better"]), None)
+
+    return {
+        "uncalibrated": {"brier": round(brier_base, 5), "ece": round(ece_base, 5)},
+        "reliability_bins": bins,
+        "candidates": candidates,
+        "applied": applied,
+        "decision": (
+            f"採用 {applied}：ΔBrier 的 95% 區間整段小於 0。"
+            if applied else
+            "不採用校準：兩種方法的 ΔBrier 95% 區間都跨 0，這 300 筆測試資料分不出差別。"
+            "模型輸出維持未校準的原值，並在文件與 API 說明裡標明「機率適合排序，"
+            "不保證『0.68 就是六成八會延遲』」。"
+        ),
+    }
+
+
+def distribution_bounds(x_train) -> dict:
+    """訓練資料每個特徵的分布邊界，給線上推論做分布外（OOD）檢查用。
+
+    模型對沒見過的輸入仍然會給出一個機率，而且看起來跟正常的一樣有自信 ——
+    展示資料的 weekly_load_ratio 是 0.125，訓練資料的範圍是 0.5 以上，
+    那個機率的可信度比分布內低，但數字本身完全看不出來。所以把邊界一起交給線上。
+    """
+    return {
+        name: {
+            "p1": round(float(np.percentile(x_train[:, i], DISTRIBUTION_LOW_PERCENTILE)), 4),
+            "p99": round(float(np.percentile(x_train[:, i], DISTRIBUTION_HIGH_PERCENTILE)), 4),
+            "min": round(float(x_train[:, i].min()), 4),
+            "max": round(float(x_train[:, i].max()), 4),
+        }
+        for i, name in enumerate(FEATURES)
+    }
+
+
 def main() -> None:
     if not DATA.exists():
         raise SystemExit(
@@ -152,6 +273,10 @@ def main() -> None:
 
     default_precision, default_recall, _, _ = precision_recall_fscore_support(
         y_test, (probabilities >= 0.5).astype(int), average="binary", zero_division=0)
+
+    # 校準評估：模型輸出的 0.68 是不是真的代表「這類工單有 68% 會延遲」。
+    # 這一段不改變模型，只回答「要不要改」——結論可能是「不要」，那也是結論。
+    calibration = evaluate_calibration(model, x_train, y_train, x_test, y_test, probabilities)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -211,6 +336,8 @@ def main() -> None:
             name: round(float(value), 4) for name, value in zip(FEATURES, coefficients)
         },
         "intercept": round(float(model.named_steps["classifier"].intercept_[0]), 4),
+        "calibration": calibration,
+        "feature_ranges": distribution_bounds(x_train),
         "golden_samples": golden,
     }
 
@@ -222,6 +349,12 @@ def main() -> None:
           f"precision {at_threshold['precision']:.4f}、recall {at_threshold['recall']:.4f}")
     print(f"  對照預設 0.5：precision {default_precision:.4f}、recall {default_recall:.4f}")
     print(f"  混淆矩陣 TN={tn} FP={fp} FN={fn} TP={tp}")
+    print(f"校準：未校準 Brier {calibration['uncalibrated']['brier']:.5f}、"
+          f"ECE {calibration['uncalibrated']['ece']:.5f}")
+    for method, result in calibration["candidates"].items():
+        print(f"  {method}: Brier {result['brier']:.5f}、ECE {result['ece']:.5f}、"
+              f"ΔBrier 95% 區間 {result['delta_brier_ci95']}")
+    print(f"  → {calibration['decision']}")
     print(f"已寫出模型與 metadata 到 {OUT_DIR}")
 
 

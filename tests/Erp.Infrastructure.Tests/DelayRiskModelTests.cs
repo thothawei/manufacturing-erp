@@ -136,6 +136,82 @@ public class DelayRiskModelTests
         }
     }
 
+    [Fact]
+    public void Metadata裡有校準評估的結果_不採用也要是有理由的決定()
+    {
+        // 「沒做校準」與「評估過、數字不支持做」是兩件事。
+        // 這條釘的是後者：calibration 區塊不見了（例如有人重寫訓練腳本時砍掉）就會紅。
+        using var model = CreateModel();
+        var calibration = model.Metadata!.Calibration;
+
+        Assert.NotNull(calibration);
+        Assert.True(calibration.Uncalibrated.Brier > 0, "沒有未校準的 Brier score，等於沒評估過");
+        Assert.False(string.IsNullOrWhiteSpace(calibration.Decision));
+
+        // 採用與否都可以，但 IsCalibrated 必須與 metadata 說的一致 ——
+        // 兩邊講不同的話，回答裡「這個機率能不能當發生率解讀」就會是錯的
+        Assert.Equal(calibration.Applied is not null, model.IsCalibrated);
+    }
+
+    [Fact]
+    public void Metadata裡有七個特徵的訓練分布範圍()
+    {
+        using var model = CreateModel();
+        var ranges = model.Metadata!.FeatureRanges;
+
+        Assert.NotNull(ranges);
+
+        foreach (var name in WorkOrderDelayFeatures.FeatureNames)
+        {
+            Assert.True(ranges.TryGetValue(name, out var range), $"{name} 沒有分布範圍");
+            Assert.True(range!.P1 <= range.P99, $"{name} 的 p1 比 p99 大");
+            Assert.True(range.Min <= range.P1 && range.P99 <= range.Max,
+                $"{name} 的百分位落在 min/max 之外，八成是欄位對映錯了");
+        }
+    }
+
+    /// **這條是 OOD 檢查的重點。**
+    ///
+    /// 展示資料的 weekly_load_ratio 算出來是 0.125，而訓練資料的下界是 0.5 ——
+    /// 模型對這種輸入照樣會給一個機率，外觀與分布內的完全一樣。
+    /// 沒有這個檢查，那個機率會安靜地被當成可信的數字用。
+    [Fact]
+    public void 分布外的輸入要被標出來_而且說得出訓練範圍()
+    {
+        using var model = CreateModel();
+
+        var features = new WorkOrderDelayFeatures(
+            MaterialReadiness: 1.0, DaysUntilDue: 5, MaxLeadTimeDays: 0,
+            ProgressRatio: 0.5, ItemOverdueRate: 0.25,
+            WeeklyLoadRatio: 0.125,        // 訓練分布是 0.5 以上
+            BomComponentCount: 4);
+
+        var outOfRange = model.FindOutOfDistributionFeatures(features);
+
+        var load = Assert.Single(outOfRange, f => f.Feature == "weekly_load_ratio");
+        Assert.Equal(0.125, load.Value, tolerance: 1e-6);
+        Assert.True(load.Value < load.TrainingLow,
+            $"值 {load.Value} 沒有低於回報的訓練下界 {load.TrainingLow}，這個標記等於沒意義");
+    }
+
+    [Fact]
+    public void 分布內的輸入不會被標成分布外()
+    {
+        // 黃金樣本本來就取自測試集，每一筆都該落在訓練分布裡。
+        // 這條防的是「把邊界寫太窄、什麼都標成 OOD」——
+        // 那種警告發久了就沒有人看，比不做還糟
+        using var model = CreateModel();
+
+        foreach (var sample in model.Metadata!.GoldenSamples)
+        {
+            var outOfRange = model.FindOutOfDistributionFeatures(ToFeatures(sample.Features));
+
+            Assert.True(outOfRange.Count == 0,
+                "訓練集裡的樣本被標成分布外："
+                + string.Join("、", outOfRange.Select(f => $"{f.Feature}={f.Value}")));
+        }
+    }
+
     private static WorkOrderDelayFeatures ToFeatures(IReadOnlyList<float> v)
         => new(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
 }

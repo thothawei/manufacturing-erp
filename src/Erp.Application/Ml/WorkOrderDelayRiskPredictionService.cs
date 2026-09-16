@@ -27,6 +27,11 @@ public sealed record WorkOrderDelayRiskComparison(
     bool? ExceedsThreshold,
 
     WorkOrderDelayFeatures? Features,
+
+    /// 落在訓練資料分布之外的特徵。空清單代表這張工單的每個特徵
+    /// 模型在訓練時都見過類似的值
+    IReadOnlyList<OutOfDistributionFeature> OutOfDistributionFeatures,
+
     string ModelDescription,
     string Note);
 
@@ -65,11 +70,13 @@ public sealed class WorkOrderDelayRiskPredictionService(
 
         double? probability = null;
         bool? exceeds = null;
+        IReadOnlyList<OutOfDistributionFeature> outOfDistribution = [];
 
         if (model.IsAvailable && features is not null)
         {
             probability = model.PredictDelayProbability(features);
             exceeds = probability >= model.DecisionThreshold;
+            outOfDistribution = model.FindOutOfDistributionFeatures(features);
         }
 
         return new WorkOrderDelayRiskComparison(
@@ -81,8 +88,9 @@ public sealed class WorkOrderDelayRiskPredictionService(
             probability,
             exceeds,
             features,
+            outOfDistribution,
             model.Description,
-            BuildNote(ruleBased is not null, probability, features is not null));
+            BuildNote(ruleBased is not null, probability, features is not null, outOfDistribution));
     }
 
     /// 從真實工單資料組出模型要的特徵。
@@ -184,7 +192,11 @@ public sealed class WorkOrderDelayRiskPredictionService(
         }
     }
 
-    private string BuildNote(bool ruleFlagged, double? probability, bool hasFeatures)
+    private string BuildNote(
+        bool ruleFlagged,
+        double? probability,
+        bool hasFeatures,
+        IReadOnlyList<OutOfDistributionFeature> outOfDistribution)
     {
         if (!hasFeatures)
         {
@@ -208,6 +220,23 @@ public sealed class WorkOrderDelayRiskPredictionService(
         {
             note += "規則式沒有把它列為風險 —— 模型的機率可以當作「要不要多看一眼」的排序依據，"
                   + "不能當作它一定會延遲的結論。";
+        }
+
+        note += model.IsCalibrated
+            ? "模型輸出的機率經過校準，可以當成發生率解讀。"
+            : "機率沒有經過校準：它適合拿來排序（0.68 比 0.42 更值得先看），"
+              + "但不保證「0.68 就是六成八會延遲」。";
+
+        // 分布外的輸入是這類模型最危險的失敗方式：它照樣給一個機率，
+        // 外觀與分布內的完全一樣，只是可信度低而沒有任何徵兆。講出來，不要讓它靜靜通過。
+        if (outOfDistribution.Count > 0)
+        {
+            var detail = string.Join("、", outOfDistribution.Select(
+                f => $"{f.Feature}={f.Value:0.####}（訓練範圍 {f.TrainingLow:0.####}~{f.TrainingHigh:0.####}）"));
+
+            note += $"**注意：這張工單有 {outOfDistribution.Count} 個特徵落在訓練資料的分布之外**（{detail}）。"
+                  + "模型沒見過這種輸入，仍然會給出機率，但那個數字的可信度比分布內低，"
+                  + "轉述時必須一併說明。";
         }
 
         return note + "模型是用模擬資料訓練的，不是真實產線資料。";

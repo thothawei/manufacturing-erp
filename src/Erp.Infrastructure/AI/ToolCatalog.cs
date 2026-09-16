@@ -224,13 +224,17 @@ public static class ToolCatalog
             回傳 rule_based_delay_days 與 rule_based_reason（規則式判斷，
             沒被列為風險時為 null）、predicted_delay_probability（模型預測的延遲機率 0~1，
             模型不可用時為 null）、exceeds_threshold（是否超過訓練時挑出的決策閾值）、
-            features（模型看到的七個特徵值）、model_description（模型來歷與評估數據）、
-            note（兩種判斷的差異說明，請照實轉述）。
+            features（模型看到的七個特徵值）、
+            out_of_distribution_features（落在訓練資料分布之外的特徵，空陣列代表都在範圍內）、
+            model_description（模型來歷與評估數據）、note（兩種判斷的差異說明，請照實轉述）。
 
-            轉述時必須說清楚三件事：
-            一、機率不是「一定會延遲」，它是排序用的參考值。
+            轉述時必須說清楚四件事：
+            一、機率不是「一定會延遲」，它是排序用的參考值，而且沒有經過校準 ——
+            　　0.68 的意思是「比 0.42 更值得先看」，不是「六成八會延遲」。
             二、模型說不出理由；要講「為什麼有風險」請用 rule_based_reason。
             三、模型是用**模擬資料**訓練的，不是真實產線資料。
+            四、out_of_distribution_features 不是空的時候，一定要講出來：
+            　　那代表模型沒見過這種輸入，機率照樣算得出來但可信度較低。
             不要把機率講成百分之幾的「準確率」或「信心度」，那是不同的東西。
 
             只想知道「哪些工單有風險」請用 list_work_orders_at_risk，那個查得比較快也看得到理由。

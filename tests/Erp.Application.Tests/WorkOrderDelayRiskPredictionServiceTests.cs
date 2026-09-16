@@ -23,7 +23,8 @@ public class WorkOrderDelayRiskPredictionServiceTests
         IEnumerable<WorkOrder> workOrders,
         IEnumerable<RoutingStep> steps,
         IEnumerable<InventoryBalance> balances,
-        bool modelAvailable = true)
+        bool modelAvailable = true,
+        IReadOnlyList<OutOfDistributionFeature>? outOfDistribution = null)
     {
         var itemRepo = new InMemoryItemRepository(TestData.Items, TestData.SupplyInfos);
         var inventoryRepo = new InMemoryInventoryRepository(balances);
@@ -31,7 +32,7 @@ public class WorkOrderDelayRiskPredictionServiceTests
         var workOrderRepo = new InMemoryWorkOrderRepository(workOrders, steps);
         var clock = new FakeClock(Today);
 
-        _model = new FakeDelayRiskModel(modelAvailable);
+        _model = new FakeDelayRiskModel(modelAvailable, outOfDistribution: outOfDistribution);
 
         return new WorkOrderDelayRiskPredictionService(
             workOrderRepo, itemRepo, bomService,
@@ -217,5 +218,53 @@ public class WorkOrderDelayRiskPredictionServiceTests
         Assert.Null(result.Features);
         Assert.Null(result.PredictedDelayProbability);
         Assert.Contains("算不出模型需要的特徵", result.Note);
+    }
+
+    [Fact]
+    public async Task 分布外的特徵要一路傳到回應與說明裡()
+    {
+        // 模型對沒見過的輸入照樣給一個機率，數字外觀與分布內的一模一樣。
+        // 這條釘的是「那件事不會靜靜通過」—— 模型標出來了，服務就得講出來
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13))],
+            [], [TestData.Balance("PANEL-01", 100_000m), TestData.Balance("SCREW-05", 100_000m)],
+            outOfDistribution: [new OutOfDistributionFeature("weekly_load_ratio", 0.125, 0.5088, 2.0896)]);
+
+        var result = await service.CompareAsync("WO-01");
+
+        var feature = Assert.Single(result.OutOfDistributionFeatures);
+        Assert.Equal("weekly_load_ratio", feature.Feature);
+        Assert.Contains("分布之外", result.Note);
+        Assert.Contains("weekly_load_ratio", result.Note);
+        Assert.Contains("可信度", result.Note);
+    }
+
+    [Fact]
+    public async Task 分布內時不要無中生有地警告()
+    {
+        // 警告只在真的有事時出現，才有人會看
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13))],
+            [], [TestData.Balance("PANEL-01", 100_000m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var result = await service.CompareAsync("WO-01");
+
+        Assert.Empty(result.OutOfDistributionFeatures);
+        Assert.DoesNotContain("分布之外", result.Note);
+    }
+
+    [Fact]
+    public async Task 機率沒校準時要講明它只適合排序()
+    {
+        // 「0.68」與「六成八會延遲」是兩件事，混為一談的成本是錯誤的決策。
+        // 假模型的 IsCalibrated 是 false，說明文字就必須講清楚這一點
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13))],
+            [], [TestData.Balance("PANEL-01", 100_000m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        var result = await service.CompareAsync("WO-01");
+
+        Assert.Contains("沒有經過校準", result.Note);
+        Assert.Contains("排序", result.Note);
     }
 }

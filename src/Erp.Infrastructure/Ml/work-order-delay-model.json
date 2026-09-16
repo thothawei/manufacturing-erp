@@ -1,5 +1,5 @@
 {
-  "trained_on": "2026-09-13",
+  "trained_on": "2026-09-16",
   "data_source": "模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
   "rows_total": 1200,
   "rows_train": 900,
@@ -48,6 +48,142 @@
     "bom_component_count": 0.014
   },
   "intercept": -0.1817,
+  "calibration": {
+    "uncalibrated": {
+      "brier": 0.20654,
+      "ece": 0.06567
+    },
+    "reliability_bins": [
+      {
+        "range": "0.0-0.1",
+        "count": 8,
+        "predicted_mean": 0.0681,
+        "actual_rate": 0.125
+      },
+      {
+        "range": "0.1-0.2",
+        "count": 44,
+        "predicted_mean": 0.1488,
+        "actual_rate": 0.2045
+      },
+      {
+        "range": "0.2-0.3",
+        "count": 43,
+        "predicted_mean": 0.2498,
+        "actual_rate": 0.3488
+      },
+      {
+        "range": "0.3-0.4",
+        "count": 45,
+        "predicted_mean": 0.3499,
+        "actual_rate": 0.2667
+      },
+      {
+        "range": "0.4-0.5",
+        "count": 37,
+        "predicted_mean": 0.4472,
+        "actual_rate": 0.4865
+      },
+      {
+        "range": "0.5-0.6",
+        "count": 37,
+        "predicted_mean": 0.5527,
+        "actual_rate": 0.5946
+      },
+      {
+        "range": "0.6-0.7",
+        "count": 32,
+        "predicted_mean": 0.6523,
+        "actual_rate": 0.5938
+      },
+      {
+        "range": "0.7-0.8",
+        "count": 28,
+        "predicted_mean": 0.7607,
+        "actual_rate": 0.8214
+      },
+      {
+        "range": "0.8-0.9",
+        "count": 22,
+        "predicted_mean": 0.8427,
+        "actual_rate": 0.7727
+      },
+      {
+        "range": "0.9-1.0",
+        "count": 4,
+        "predicted_mean": 0.916,
+        "actual_rate": 0.75
+      }
+    ],
+    "candidates": {
+      "sigmoid": {
+        "brier": 0.20609,
+        "ece": 0.05539,
+        "delta_brier_median": -0.00042,
+        "delta_brier_ci95": [
+          -0.0018,
+          0.0009
+        ],
+        "significantly_better": false
+      },
+      "isotonic": {
+        "brier": 0.20866,
+        "ece": 0.08243,
+        "delta_brier_median": 0.00207,
+        "delta_brier_ci95": [
+          -0.00123,
+          0.00567
+        ],
+        "significantly_better": false
+      }
+    },
+    "applied": null,
+    "decision": "不採用校準：兩種方法的 ΔBrier 95% 區間都跨 0，這 300 筆測試資料分不出差別。模型輸出維持未校準的原值，並在文件與 API 說明裡標明「機率適合排序，不保證『0.68 就是六成八會延遲』」。"
+  },
+  "feature_ranges": {
+    "material_readiness": {
+      "p1": 0.018,
+      "p99": 1.0,
+      "min": 0.0006,
+      "max": 1.0
+    },
+    "days_until_due": {
+      "p1": -6.0,
+      "p99": 24.0,
+      "min": -6.0,
+      "max": 24.0
+    },
+    "max_lead_time_days": {
+      "p1": 0.0,
+      "p99": 14.0,
+      "min": 0.0,
+      "max": 14.0
+    },
+    "progress_ratio": {
+      "p1": 0.0065,
+      "p99": 0.9854,
+      "min": 0.0006,
+      "max": 0.9984
+    },
+    "item_overdue_rate": {
+      "p1": 0.12,
+      "p99": 0.42,
+      "min": 0.12,
+      "max": 0.42
+    },
+    "weekly_load_ratio": {
+      "p1": 0.5088,
+      "p99": 2.0896,
+      "min": 0.5005,
+      "max": 2.0896
+    },
+    "bom_component_count": {
+      "p1": 2.0,
+      "p99": 8.0,
+      "min": 2.0,
+      "max": 8.0
+    }
+  },
   "golden_samples": [
     {
       "features": [

@@ -4,6 +4,17 @@ namespace Erp.Application.Ml;
 /// 預測服務要能如實說「沒有模型」，而不是回一個看起來像機率的數字。
 public sealed class DelayRiskModelUnavailableException(string message) : Exception(message);
 
+/// 一個落在訓練資料分布之外的特徵。
+///
+/// 模型對沒見過的輸入照樣會給出一個機率，而且那個數字看起來與分布內的一樣有自信 ——
+/// 這是它最危險的失敗方式：不報錯、不異常，只是可信度低而沒有人知道。
+/// 把超界的欄位與訓練範圍一起回報出去，讓看到機率的人能自己判斷要不要採信。
+public sealed record OutOfDistributionFeature(
+    string Feature,
+    double Value,
+    double TrainingLow,
+    double TrainingHigh);
+
 /// 延遲風險模型的 port。
 ///
 /// 定義在 Application、實作在 Infrastructure，理由與 ILlmClient 一樣：
@@ -23,6 +34,20 @@ public interface IDelayRiskModel
     /// 誤報的代價只是生管多看一眼。兩者不對稱，閾值就不該用對稱的預設值。
     double DecisionThreshold { get; }
 
+    /// 模型輸出的機率有沒有經過校準（Platt／isotonic）。
+    ///
+    /// 沒校準的機率只保證**排序**有意義：0.68 比 0.42 更可能延遲，
+    /// 但 0.68 不保證「這類工單真的有 68% 會延遲」。這兩件事常被混為一談，
+    /// 所以由模型自己講出來，而不是寫死在回答文字裡。
+    bool IsCalibrated { get; }
+
     /// 預測「這張工單會延遲」的機率（0~1）
     double PredictDelayProbability(WorkOrderDelayFeatures features);
+
+    /// 找出落在訓練資料分布之外的特徵。全部在範圍內時回空清單。
+    ///
+    /// 訓練分布的邊界由 metadata 提供；沒有 metadata 時無從判斷，同樣回空清單
+    /// —— 但那種情況下 Description 已經說了「沒有 metadata」。
+    IReadOnlyList<OutOfDistributionFeature> FindOutOfDistributionFeatures(
+        WorkOrderDelayFeatures features);
 }

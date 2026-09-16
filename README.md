@@ -21,7 +21,7 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-397 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 427；
+405 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 435；
 沒裝時它們標記為 6 個 skip，另有 3 個接真實 Anthropic API 的測試同樣 skip）。
 
 **還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
@@ -770,14 +770,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-397 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
-跑起來共 427 個；接真實 Anthropic API 的 3 個測試沒金鑰時 skip：
+405 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 435 個；接真實 Anthropic API 的 3 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 93 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 257（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
-| `Erp.Api.Tests` | 35 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Application.Tests` | 96 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 261（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Api.Tests` | 36 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 **「30 個」與「6 個 skip」是同一組測試**：`OllamaTheory` 在 skip 時不展開
@@ -947,8 +947,11 @@ curl "http://localhost:5199/api/mrp/shortages"
   `/api/mrp/time-phased` 回答（見「時間分期」）。兩個端點各司其職，
   把分期塞回前者只會讓一個回傳同時回答兩件事。
 - **ML 延遲風險模型是用模擬資料訓練的**，而且展示資料的特徵落在訓練分布之外
-  （`weekly_load_ratio` 算出來 0.125，訓練分布是 0.5~1.6）。沒有分布檢查、
-  沒有機率校準、沒有模型監控與重訓機制。完整清單在
+  （`weekly_load_ratio` 算出來 0.125，訓練分布下界是 0.5088）。這件事現在**在回應裡看得見**：
+  `outOfDistributionFeatures` 會列出超界的特徵與訓練範圍（2026-09-16 補上）。
+  機率校準也評估過了，結論是不採用 —— Platt 與 isotonic 的 ΔBrier 95% bootstrap 區間都跨 0，
+  這 300 筆測試資料分不出差別，所以機率維持未校準、只當排序用。
+  仍然沒有的是模型監控與重訓機制。完整清單在
   [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)。
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
