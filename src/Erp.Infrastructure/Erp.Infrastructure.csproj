@@ -22,6 +22,8 @@
   <ItemGroup>
     <None Update="Ml\work-order-delay-model.onnx" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Ml\work-order-delay-model.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Ml\material-demand-forecast-model.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Ml\material-demand-forecast-model.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

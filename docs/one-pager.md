@@ -28,10 +28,13 @@ LLM 拿到的是結果，不是原料。
    無關查詢（「今天天氣如何」）的相似度比真正相關的查詢還高，
    **沒有任何門檻值能分開兩者，防幻覺的第一道防線形同不存在**。
    換成 `bge-m3` 之後，這件事被寫成一個獨立的 CI job（接真實 Ollama，不准 skip）。
-5. **一條完整的 ML pipeline，而且誠實**（`docs/ml-risk-prediction-module-plan-v1.md`）——
-   模擬歷史資料 → 清理 → 特徵工程 → logistic regression → ONNX 匯入 .NET 推論，
-   與既有的規則式判斷並存對照。訓練資料是模擬的這件事寫在文件第一行，
-   不藏在附註裡；閾值 0.26 是依「漏抓比誤報代價高」選出來的，不是預設的 0.5。
+5. **兩條完整的 ML pipeline，而且誠實**——延遲風險二元分類
+   （`docs/ml-risk-prediction-module-plan-v1.md`：模擬歷史資料 → 清理 → 特徵工程 →
+   logistic regression → ONNX 匯入 .NET 推論，與既有的規則式判斷並存對照，
+   訓練資料是模擬的這件事寫在文件第一行；閾值 0.26 是依「漏抓比誤報代價高」選出來的，
+   不是預設的 0.5）；物料需求時間序列預測（`docs/material-demand-forecast-plan-v1.md`：
+   seasonal naive／GBDT／小型 DL 三方對照，GBDT 贏，MAPE 6.63% vs 基準線 9.88%，
+   DL 對照組反而最差——結論是實測跑出來的，不是先猜好再找數字配合）。
 6. **每條防線都做過反向驗證** —— 把防線拔掉、確認測試會紅，再還原。
    沒有紅過的測試等於沒有測試。
 
@@ -39,7 +42,7 @@ LLM 拿到的是結果，不是原料。
 
 | | |
 |---|---|
-| 測試 | 415 個（本機有 Ollama 時 439），0 警告，CI 兩個 job 全綠 |
+| 測試 | 433 個（本機有 Ollama 時 457），0 警告，CI 兩個 job 全綠 |
 | AI 工具 | 12 個（11 唯讀 + 1 寫入建議），背後 10 個 Application 服務 |
 | 架構邊界 | 12 個架構測試守住分層依賴 |
 | 文件 | AI 助理規劃 v1 → v2 → v3 逐條對帳，另有 RAG 與 ML 兩份獨立的決策紀錄 |
@@ -79,4 +82,5 @@ LLM 組成一段自然語言。**中間每個數字都來自後端，而且都�
 - **工具契約、庫存計算基準、防幻覺機制** —— [`docs/ai-assistant-module-plan-v2.md`](ai-assistant-module-plan-v2.md)
 - **RAG 的範疇、資料流、七個決策點** —— [`docs/rag-module-plan-v1.md`](rag-module-plan-v1.md)
 - **ML 模組的資料、特徵、閾值與 skew 防線** —— [`docs/ml-risk-prediction-module-plan-v1.md`](ml-risk-prediction-module-plan-v1.md)
+- **時間序列三方對照的資料、特徵與結果** —— [`docs/material-demand-forecast-plan-v1.md`](material-demand-forecast-plan-v1.md)
 - **怎麼把展示站部署上線** —— [`deploy/README.md`](../deploy/README.md)

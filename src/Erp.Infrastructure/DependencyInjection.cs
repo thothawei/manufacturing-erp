@@ -70,6 +70,13 @@ public static class DependencyInjection
         return services;
     }
 
+    /// 物料需求時間序列預測（S6）。同一個可選模組模式、同一個 singleton 理由。
+    public static IServiceCollection AddMaterialDemandForecastModel(this IServiceCollection services)
+    {
+        services.AddSingleton<IMaterialDemandForecastModel, OnnxMaterialDemandForecastModel>();
+        return services;
+    }
+
     /// 文件語意檢索。可選模組：沒裝 Ollama 時核心 ERP 與其他八個工具完全正常，
     /// 只有 search_documents 會回 SERVICE_UNAVAILABLE。
     ///

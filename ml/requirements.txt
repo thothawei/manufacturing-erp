@@ -5,3 +5,10 @@ pandas==2.3.3
 scikit-learn==1.6.1
 skl2onnx==1.20.0
 onnxruntime==1.19.2
+
+# ml/train_demand_forecast.py（S6：物料需求時間序列預測）額外需要的套件。
+# lightgbm 沒有 skl2onnx 轉換器，onnxmltools 才有；onnxmltools 1.13 以下
+# 對不上新版 onnx 的 API（onnx.mapping 已移除），1.16 起才相容，兩個一起釘版本。
+lightgbm==4.5.0
+onnx==1.22.0
+onnxmltools==1.16.0

@@ -62,6 +62,7 @@ builder.Services.AddOpenApi(options =>
 });
 builder.Services.AddAiAssistant(builder.Configuration);
 builder.Services.AddDelayRiskModel();
+builder.Services.AddMaterialDemandForecastModel();
 
 var app = builder.Build();
 
@@ -343,6 +344,50 @@ app.MapGet("/api/quality/summary", async (
     .WithSummary("品管檢驗彙總")
     .WithDescription("同一張工單的多次檢驗已由後端合併成一列，含不良原因彙整。");
 
+// 物料需求時間序列預測（S6，見 docs/material-demand-forecast-plan-v1.md）。
+//
+// 這個端點刻意是 POST 而不是 GET /api/items/{itemCode}/demand-forecast：
+// 這個系統目前沒有任何地方持久化「歷史週別實際需求」，模型需要的 lag/移動平均特徵
+// 沒有地方可以在伺服器這一側查出來，只能由呼叫端算好、隨請求提供。
+// 這不是偷懶少做一步，是誠實反映「這個資料還不存在」——見上面文件第 5 節的說明。
+app.MapPost("/api/ml/demand-forecast", (
+        DemandForecastRequest request, IMaterialDemandForecastModel model) =>
+    {
+        if (!MaterialDemandForecastFeatures.KnownItems.Contains(request.ItemCode))
+        {
+            return Results.BadRequest(new
+            {
+                error = $"itemCode 必須是 {string.Join("、", MaterialDemandForecastFeatures.KnownItems)} 之一，"
+                    + $"收到的是 {request.ItemCode}"
+            });
+        }
+
+        var features = MaterialDemandForecastFeatures.ForItem(
+            request.ItemCode, request.Lag1, request.Lag2, request.Lag3, request.Lag4, request.Lag52,
+            request.RollingMean4, request.RollingMean12, request.WeekOfYear);
+
+        return Results.Ok(new
+        {
+            itemCode = request.ItemCode,
+            // seasonal naive 基準線不需要模型，就是「去年同一週」那個數字本身
+            seasonalNaiveDemand = request.Lag52,
+            predictedDemand = model.IsAvailable ? model.PredictDemand(features) : (double?)null,
+            deployedModel = model.DeployedModel,
+            winnerByMape = model.WinnerByMape,
+            modelAvailable = model.IsAvailable,
+            description = model.Description
+        });
+    })
+    .WithSummary("物料需求預測：seasonal naive vs GBDT")
+    .WithDescription(
+        "同時給出 seasonal naive 基準線（去年同一週的實際值）與 GBDT 模型的預測值。" +
+        "**特徵由呼叫端提供，不是伺服器算的**：這個系統目前沒有持久化歷史週別需求，" +
+        "沒有地方可以在請求當下重新查出 lag/移動平均特徵。" +
+        "winnerByMape 是訓練時三方對照（seasonal naive／GBDT／小型 DL）依平均 MAPE 選出的贏家，" +
+        "不一定等於 deployedModel（目前固定部署 gbdt，理由見 metadata 的 deploymentNote）。" +
+        "itemCode 只認得三個訓練過的料號，其餘一律回 400。" +
+        "**訓練資料是模擬的，不是真實產線資料。**");
+
 app.Run();
 
 // 讓整合測試能參考這個 Program 類別
@@ -353,6 +398,12 @@ public sealed record AskRequest(string Question, string? ConversationId = null, 
 /// 核准／駁回時要指明是誰做的決定。沒有身分驗證，所以這是一筆稽核紀錄，
 /// 不是一道權限檢查 —— README 的已知限制有寫明。
 public sealed record DecisionRequest(string DecidedBy);
+
+/// 物料需求預測的請求。所有 lag/移動平均特徵由呼叫端算好提供，理由見端點說明。
+public sealed record DemandForecastRequest(
+    string ItemCode,
+    double Lag1, double Lag2, double Lag3, double Lag4, double Lag52,
+    double RollingMean4, double RollingMean12, int WeekOfYear);
 
 public partial class Program
 {

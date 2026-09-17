@@ -19,9 +19,9 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十七個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十八個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-415 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 439；
+433 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 457；
 沒裝時它們標記為 6 個 skip，另有 5 個接真實 Anthropic API 的測試同樣 skip）。
 
 **還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
@@ -121,7 +121,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十七個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十八個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -751,6 +751,38 @@ ml/.venv/bin/python ml/train.py                    # 訓練、評估、匯出 ON
 clone 下來跑 `dotnet test` 不必裝任何 Python 套件。模型檔載不起來時整個服務照常啟動，
 預測會如實說「沒有模型」，而不是回一個看起來像機率的預設值。
 
+## 物料需求時間序列預測（S6，選做）—— 第二個 ML 模組
+
+三方誠實對照：seasonal naive（去年同一週）、GBDT（LightGBM + lag 特徵）、
+小型 DL（`MLPRegressor`）。實測結果（20 週測試集）：
+
+| 方法 | MAE | RMSE | MAPE |
+|---|---|---|---|
+| seasonal naive | 150.40 | 289.27 | 9.88% |
+| **GBDT（部署）** | **101.63** | **205.62** | **6.63%** |
+| 小型 DL（MLPRegressor） | 194.14 | 289.17 | 19.92% |
+
+GBDT 贏，而且贏的不只是 baseline，DL 對照組反而是三者裡最差的——這跟先猜的
+「小樣本時間序列 DL 打不過 seasonal naive」不完全一樣，猜的方向沒錯（DL 不是萬靈丹），
+細節是跑出來才知道的。完整決策紀錄在
+[`docs/material-demand-forecast-plan-v1.md`](docs/material-demand-forecast-plan-v1.md)。
+
+```bash
+curl -X POST http://localhost:5199/api/ml/demand-forecast \
+  -H 'Content-Type: application/json' \
+  -d '{"itemCode":"PANEL-01","lag1":240,"lag2":235,"lag3":250,"lag4":245,
+       "lag52":230,"rollingMean4":242.5,"rollingMean12":238,"weekOfYear":10}'
+```
+
+**這個端點是 POST、特徵由呼叫端提供，不是伺服器算的**——跟延遲風險模型不同，
+這個系統目前沒有任何地方持久化歷史週別實際需求，伺服器沒有地方可以在請求當下
+重新查出 lag/移動平均特徵。這不是少做一步，是誠實反映「這張資料表還不存在」。
+同一個理由，這個模型**沒有掛成第十三個 AI 工具**——LLM 沒有管道自己生出一組
+lag 特徵，硬掛上去只會是一個問不出來也答不出來的工具。
+
+**DL 用 `MLPRegressor` 不是 N-BEATS/1D-CNN**：這個 repo 的訓練工具鏈只有
+scikit-learn，沒有 PyTorch。取捨與理由見上面連結的文件第 6 節。
+
 ## API 錯誤處理
 
 `ErpExceptionHandler` 把 Application 層的例外對映成語意正確的狀態碼。
@@ -859,14 +891,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-415 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
-跑起來共 439 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
+433 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 457 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 96 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 270（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）；另有接真實模型的檢索品質與端到端評測測試 |
-| `Erp.Api.Tests` | 37 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動、ML 模型註冊健康檢查（`WebApplicationFactory`） |
+| `Erp.Application.Tests` | 105 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算、模擬資料生成器），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 277（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）、物料需求預測模型（S6）；另有接真實模型的檢索品質與端到端評測測試 |
+| `Erp.Api.Tests` | 39 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動、ML 模型註冊健康檢查、物料需求預測端點（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 **「30 個」與「6 個 skip」是同一組測試**：`OllamaTheory` 在 skip 時不展開
@@ -1066,8 +1098,14 @@ curl "http://localhost:5199/api/mrp/shortages"
   `outOfDistributionFeatures` 會列出超界的特徵與訓練範圍（2026-09-16 補上）。
   機率校準也評估過了，結論是不採用 —— Platt 與 isotonic 的 ΔBrier 95% bootstrap 區間都跨 0，
   這 300 筆測試資料分不出差別，所以機率維持未校準、只當排序用。
-  仍然沒有的是模型監控與重訓機制。完整清單在
+  模型檔與程式碼版本對不上時也會被抓到（2026-09-17 補上，見「第四道防線」），
+  仍然沒有的是資料漂移監控與自動重訓機制。完整清單在
   [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)。
+- **系統裡沒有任何地方持久化歷史週別物料需求**：物料需求時間序列預測（S6）的
+  `/api/ml/demand-forecast` 因此得靠呼叫端自己提供 lag 特徵，不是伺服器從資料庫查出來的——
+  要讓這個功能真的「查得到」，得先加一張記錄實際發料/消耗量的表，
+  那是比這個模組本身更大的工程，見
+  [`docs/material-demand-forecast-plan-v1.md`](docs/material-demand-forecast-plan-v1.md) 第 10 節。
 - **BOM 展開是逐階查詢**：每個節點一次資料庫往返，深層 BOM 會放大成本。
   正確解法是一次載入整棵樹或改用遞迴 CTE，目前資料量下不構成問題。
   （採購單與補料條件的 N+1 已消除，由 `QueryEfficiencyTests` 把關。）

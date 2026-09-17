@@ -1,0 +1,189 @@
+{
+  "trained_on": "2026-09-17",
+  "data_source": "模擬資料（MaterialDemandHistoryGenerator，seed=20260917），非真實產線資料",
+  "items": [
+    "PANEL-01",
+    "SCREW-05",
+    "CABLE-07"
+  ],
+  "weeks_total": 156,
+  "rows_train": 252,
+  "rows_test": 60,
+  "train_end_week": 135,
+  "features": [
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "lag_4",
+    "lag_52",
+    "rolling_mean_4",
+    "rolling_mean_12",
+    "week_of_year",
+    "item_is_panel01",
+    "item_is_screw05",
+    "item_is_cable07"
+  ],
+  "comparison": {
+    "method_note": "決勝負用逐品項 MAPE 的平均，不是整體 MAE——三個品項的需求量級差十幾倍，整體 MAE 會被量級最大的品項主導。",
+    "mean_mape_by_method": {
+      "seasonal_naive": 0.0988,
+      "gbdt": 0.0663,
+      "mlp": 0.1992
+    },
+    "winner_by_mape": "gbdt",
+    "overall": {
+      "seasonal_naive": {
+        "mae": 150.4,
+        "rmse": 289.272,
+        "mape": 0.0988
+      },
+      "gbdt": {
+        "mae": 101.63,
+        "rmse": 205.62,
+        "mape": 0.0663
+      },
+      "mlp": {
+        "mae": 194.144,
+        "rmse": 289.165,
+        "mape": 0.1992
+      }
+    },
+    "by_item": {
+      "PANEL-01": {
+        "seasonal_naive": {
+          "mae": 29.9,
+          "rmse": 37.947,
+          "mape": 0.1089
+        },
+        "gbdt": {
+          "mae": 20.133,
+          "rmse": 25.026,
+          "mape": 0.0738
+        },
+        "mlp": {
+          "mae": 60.591,
+          "rmse": 67.542,
+          "mape": 0.2537
+        }
+      },
+      "SCREW-05": {
+        "seasonal_naive": {
+          "mae": 390.475,
+          "rmse": 498.285,
+          "mape": 0.108
+        },
+        "gbdt": {
+          "mae": 264.232,
+          "rmse": 354.192,
+          "mape": 0.0736
+        },
+        "mlp": {
+          "mae": 428.572,
+          "rmse": 485.122,
+          "mape": 0.1132
+        }
+      },
+      "CABLE-07": {
+        "seasonal_naive": {
+          "mae": 30.825,
+          "rmse": 36.148,
+          "mape": 0.0795
+        },
+        "gbdt": {
+          "mae": 20.525,
+          "rmse": 27.574,
+          "mape": 0.0515
+        },
+        "mlp": {
+          "mae": 93.269,
+          "rmse": 104.613,
+          "mape": 0.2308
+        }
+      }
+    }
+  },
+  "deployed_model": "gbdt",
+  "deployment_note": "固定部署 gbdt，跟贏家（gbdt）一致，不是巧合也不是刻意挑的。",
+  "golden_samples": [
+    {
+      "features": [
+        160.0,
+        183.0,
+        158.0,
+        154.0,
+        167.0,
+        163.75,
+        182.083328,
+        32.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected_prediction": 181.633156
+    },
+    {
+      "features": [
+        196.0,
+        185.0,
+        225.0,
+        185.0,
+        230.0,
+        197.75,
+        180.333328,
+        37.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected_prediction": 212.360019
+    },
+    {
+      "features": [
+        237.0,
+        257.0,
+        204.0,
+        222.0,
+        259.0,
+        230.0,
+        204.583328,
+        42.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected_prediction": 249.69365
+    },
+    {
+      "features": [
+        360.0,
+        285.0,
+        311.0,
+        309.0,
+        298.0,
+        316.25,
+        253.833328,
+        47.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected_prediction": 339.400938
+    },
+    {
+      "features": [
+        4115.0,
+        3891.0,
+        3807.0,
+        4032.0,
+        3590.0,
+        3961.25,
+        4168.583496,
+        32.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "expected_prediction": 3940.107738
+    }
+  ]
+}
