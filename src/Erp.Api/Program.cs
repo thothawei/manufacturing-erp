@@ -206,6 +206,35 @@ app.MapGet("/api/work-orders/{workOrderNo}/delay-risk", async (
         "模型對這種輸入照樣給得出機率，但可信度較低。" +
         "模型檔不存在時 predictedDelayProbability 為 null，規則式判斷照常可用。");
 
+// 模型註冊／健康檢查（S5 的一部分，見 docs/ml-dl-llm-strengthening-plan-v1.md）。
+//
+// 這裡回答的是「現在載進來的是哪個模型、跟程式碼對不對得上」——
+// featureSchemaConsistent 是 false 時，available 也一定是 false：
+// 特徵順序對不上代表模型會把數值餵進錯的欄位，那不是「品質比較差」，
+// 是「這個結果沒有意義」，所以直接停用而不是照樣回傳一個機率。
+// 漂移監控與自動重訓刻意不做，理由跟 ml-risk-prediction-module-plan-v1.md 第 10 節一致：
+// 標籤延遲（工單要完工才知道有沒有延遲）讓「自動」重訓在這個規模下是假的。
+app.MapGet("/api/ml/model-health", (IDelayRiskModel model) => Results.Ok(new
+{
+    available = model.IsAvailable,
+    description = model.Description,
+    isCalibrated = model.IsCalibrated,
+    decisionThreshold = model.DecisionThreshold,
+    featureSchemaConsistent = model.FeatureSchemaConsistent,
+    trainedOn = model.TrainedOn,
+    dataSource = model.DataSource,
+    rowsTotal = model.RowsTotal,
+    rocAuc = model.RocAuc
+}))
+    .WithSummary("延遲風險模型的註冊資訊與健康狀態")
+    .WithDescription(
+        "回答「現在載進來的是哪個模型、可不可信」，不是延遲風險預測本身" +
+        "（預測請用 /api/work-orders/{workOrderNo}/delay-risk）。" +
+        "featureSchemaConsistent 為 false 時 available 必定也是 false —— " +
+        "特徵順序與程式碼對不上時，模型會把數值餵進錯的欄位，" +
+        "為避免回傳一個外觀正常但語意錯誤的機率，直接停用預測。" +
+        "沒有模型檔時多數欄位為 null，description 會說明原因。");
+
 // 採購建議的人工確認流程。
 //
 // 這三個端點刻意**不是** AI 工具：AI 只能產生「待人工確認」的建議

@@ -19,9 +19,9 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十七個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-413 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 443；
+415 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 439；
 沒裝時它們標記為 6 個 skip，另有 5 個接真實 Anthropic API 的測試同樣 skip）。
 
 **還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
@@ -121,7 +121,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十七個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -708,6 +708,37 @@ ROC AUC 是 0.7386 而不是 0.99：生成規則裡有 5% 標籤翻轉，延遲�
    「有缺料時用缺料件數、沒缺料時用葉節點數」，單元測試全綠、離線評估正常，
    打一次 API 才看出線上算出來是 1 而訓練資料裡是 2~8。同一個特徵兩種意思。
 
+### 第四道防線：執行期比對特徵順序，對不上就停用
+
+前三道防線都在「訓練或測試的當下」把關，防不住一種情況：metadata 檔被手動改過、
+或有人動了 `WorkOrderDelayFeatures` 的欄位順序卻忘記重新訓練，而且**沒有人跑測試就把
+兩個檔案一起部署了**。ONNX 吃的是沒有欄位名稱的張量，這種情況下不會報錯，
+只會把數值餵進錯的欄位，算出一個外觀正常但語意錯誤的機率——跟分布外輸入是同一種
+「不報錯的失敗」。
+
+`OnnxDelayRiskModel` 載入時會比對 metadata 宣告的特徵順序跟程式碼目前的
+`WorkOrderDelayFeatures.FeatureNames`，對不上就把 `IsAvailable` 判定為 false，
+預測請求會得到「沒有模型」而不是一個看起來合理但錯位算出來的數字。
+`/api/ml/model-health` 端點把這個狀態（連同 `isCalibrated`、`decisionThreshold`、
+`trainedOn`、`dataSource`、`rowsTotal`、`rocAuc`）曝露出來：
+
+```bash
+curl "http://localhost:5199/api/ml/model-health"
+```
+
+```json
+{"available":true,"description":"logistic regression，訓練於 2026-09-16，…",
+ "isCalibrated":false,"decisionThreshold":0.26,"featureSchemaConsistent":true,
+ "trainedOn":"2026-09-16","dataSource":"模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
+ "rowsTotal":1200,"rocAuc":0.7386}
+```
+
+這是 [`ml-dl-llm-strengthening-plan-v1.md`](docs/ml-dl-llm-strengthening-plan-v1.md) S5
+（模型生命週期／MLOps）裡「模型檔與程式碼版本對不上時要能當場看出來」那一小塊，
+先做的理由跟 S4 一樣：不需要下載任何預訓練權重。S5 其餘的部分（MLflow 實驗追蹤、
+PSI 漂移偵測）還沒做——前者要有第二個模型才划算比較，後者需要先有一層推論請求的
+特徵記錄，兩者都留給之後。
+
 ### 重新訓練
 
 ```bash
@@ -828,14 +859,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-413 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
-跑起來共 443 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
+415 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 439 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 96 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 269（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）；另有接真實模型的檢索品質與端到端評測測試 |
-| `Erp.Api.Tests` | 36 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
+| `Erp.Infrastructure.Tests` | 270（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）；另有接真實模型的檢索品質與端到端評測測試 |
+| `Erp.Api.Tests` | 37 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動、ML 模型註冊健康檢查（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 **「30 個」與「6 個 skip」是同一組測試**：`OllamaTheory` 在 skip 時不展開

@@ -41,6 +41,25 @@ public interface IDelayRiskModel
     /// 所以由模型自己講出來，而不是寫死在回答文字裡。
     bool IsCalibrated { get; }
 
+    /// metadata 宣告的特徵順序跟程式碼目前的 WorkOrderDelayFeatures.FeatureNames 對不對得上。
+    ///
+    /// false 時 IsAvailable 也一定是 false —— 對不上代表模型會把數值餵進錯的欄位，
+    /// 那不是「品質比較差」，是「這個結果沒有意義」。給模型註冊／健康檢查這類用途看，
+    /// 不需要因此把整包 metadata（含黃金樣本、特徵分布範圍等實作細節）暴露到 Application 層。
+    bool FeatureSchemaConsistent { get; }
+
+    /// 訓練日期，沒有 metadata 時為 null
+    string? TrainedOn { get; }
+
+    /// 訓練資料的來源說明（例如「模擬資料，非真實產線資料」），沒有 metadata 時為 null
+    string? DataSource { get; }
+
+    /// 訓練樣本總數，沒有 metadata 時為 null
+    int? RowsTotal { get; }
+
+    /// 訓練時的 ROC AUC，沒有 metadata 時為 null
+    double? RocAuc { get; }
+
     /// 預測「這張工單會延遲」的機率（0~1）
     double PredictDelayProbability(WorkOrderDelayFeatures features);
 

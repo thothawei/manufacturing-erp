@@ -69,6 +69,16 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
     private readonly InferenceSession? _session;
     private readonly string _inputName = "features";
 
+    /// metadata 宣告的特徵順序跟 WorkOrderDelayFeatures.FeatureNames 對不上。
+    ///
+    /// 這是 S5（docs/ml-dl-llm-strengthening-plan-v1.md）明講的那個事故：
+    /// 「模型檔與程式碼版本對不上時要能當場看出來」。ONNX 吃的是沒有欄位名稱的張量，
+    /// 對不上時不會報錯，只會把數值餵進錯的欄位，算出一個外觀正常但語意錯誤的機率——
+    /// 跟分布外輸入是同一種「不報錯的失敗」，所以處理方式也一樣：停用，而不是照跑。
+    /// `Metadata裡的特徵名稱與程式碼裡的定義一致` 那條測試在 CI 就會抓到這件事，
+    /// 這裡是多一層執行期防線，防的是「metadata 手動改過、但沒人重跑過測試」這種情況。
+    private readonly bool _schemaMismatch;
+
     public OnnxDelayRiskModel(ILogger<OnnxDelayRiskModel> logger)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
@@ -93,14 +103,29 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
                     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
                 : null;
 
-            Description = Metadata is null
-                ? "已載入模型，但沒有 metadata"
-                : $"logistic regression，訓練於 {Metadata.TrainedOn}，"
-                  + $"資料：{Metadata.DataSource}，樣本 {Metadata.RowsTotal} 筆，"
-                  + $"ROC AUC {Metadata.Metrics.RocAuc:F4}，"
-                  + $"決策閾值 {Metadata.Metrics.Threshold:F2}"
-                  + $"（precision {Metadata.Metrics.PrecisionAtThreshold:F4}、"
-                  + $"recall {Metadata.Metrics.RecallAtThreshold:F4}）";
+            _schemaMismatch = Metadata is not null
+                && !WorkOrderDelayFeatures.FeatureNames.SequenceEqual(Metadata.Features);
+
+            if (_schemaMismatch)
+            {
+                logger.LogError(
+                    "延遲風險模型的特徵順序與程式碼不一致，模型檔：{ModelFeatures}，程式碼：{CodeFeatures}，"
+                    + "為避免用錯位的數值算出一個外觀正常但錯誤的機率，已停用預測",
+                    string.Join(",", Metadata!.Features), string.Join(",", WorkOrderDelayFeatures.FeatureNames));
+            }
+
+            Description = _schemaMismatch
+                ? $"模型檔的特徵定義（{string.Join("、", Metadata!.Features)}）與程式碼目前的定義"
+                  + $"（{string.Join("、", WorkOrderDelayFeatures.FeatureNames)}）不一致，"
+                  + "為避免算出錯位的機率，已停用預測，請重跑 ml/train.py 或還原程式碼"
+                : Metadata is null
+                    ? "已載入模型，但沒有 metadata"
+                    : $"logistic regression，訓練於 {Metadata.TrainedOn}，"
+                      + $"資料：{Metadata.DataSource}，樣本 {Metadata.RowsTotal} 筆，"
+                      + $"ROC AUC {Metadata.Metrics.RocAuc:F4}，"
+                      + $"決策閾值 {Metadata.Metrics.Threshold:F2}"
+                      + $"（precision {Metadata.Metrics.PrecisionAtThreshold:F4}、"
+                      + $"recall {Metadata.Metrics.RecallAtThreshold:F4}）";
         }
         catch (Exception ex) when (ex is OnnxRuntimeException or JsonException or IOException)
         {
@@ -111,7 +136,7 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
         }
     }
 
-    public bool IsAvailable => _session is not null;
+    public bool IsAvailable => _session is not null && !_schemaMismatch;
 
     public string Description { get; } = "";
 
@@ -127,9 +152,21 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
     /// 只是多一層沒有證據支持的加工。詳見 metadata 的 calibration.decision。
     public bool IsCalibrated => Metadata?.Calibration?.Applied is not null;
 
+    /// 沒有 metadata 時無從比對，回傳 true——那種情況下 IsAvailable 已經是 false 了
+    /// （沒有模型檔或模型檔載入失敗），不需要再疊一個「不一致」的訊號讓人誤會成別的問題。
+    public bool FeatureSchemaConsistent => !_schemaMismatch;
+
+    public string? TrainedOn => Metadata?.TrainedOn;
+
+    public string? DataSource => Metadata?.DataSource;
+
+    public int? RowsTotal => Metadata?.RowsTotal;
+
+    public double? RocAuc => Metadata?.Metrics.RocAuc;
+
     public double PredictDelayProbability(WorkOrderDelayFeatures features)
     {
-        if (_session is null)
+        if (_session is null || _schemaMismatch)
         {
             throw new DelayRiskModelUnavailableException(Description);
         }

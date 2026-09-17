@@ -112,6 +112,40 @@ public class DelayRiskModelTests
         Assert.Equal(WorkOrderDelayFeatures.FeatureNames, model.Metadata!.Features);
     }
 
+    /// 上一條測試釘的是「目前這份 metadata 是對的」，這條釘的是
+    /// 「metadata 對不上時，模型會不會真的停用」—— 兩者是不同的斷言，
+    /// 前者綠燈不代表後者的防線接上了。S5（docs/ml-dl-llm-strengthening-plan-v1.md）
+    /// 明講的事故就是這個：模型檔與程式碼版本對不上時要能當場看出來，
+    /// 而不是照跑一個外觀正常但用錯欄位算出來的機率。
+    [Fact]
+    public void 特徵順序與metadata不一致時_模型會停用而不是照跑()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
+        var metadataPath = Path.Combine(directory, "work-order-delay-model.json");
+        var backup = metadataPath + ".bak";
+
+        File.Copy(metadataPath, backup, overwrite: true);
+        try
+        {
+            var mutated = File.ReadAllText(metadataPath)
+                .Replace("\"material_readiness\"", "\"totally_different_feature\"");
+            Assert.NotEqual(File.ReadAllText(metadataPath), mutated); // 確認真的換到了，不是誤判字串沒命中
+            File.WriteAllText(metadataPath, mutated);
+
+            using var model = CreateModel();
+
+            Assert.False(model.IsAvailable, "特徵定義對不上時模型仍然回報可用");
+            Assert.Contains("不一致", model.Description);
+            Assert.Throws<DelayRiskModelUnavailableException>(
+                () => model.PredictDelayProbability(new WorkOrderDelayFeatures(1, 1, 1, 1, 1, 1, 1)));
+        }
+        finally
+        {
+            File.Copy(backup, metadataPath, overwrite: true);
+            File.Delete(backup);
+        }
+    }
+
     [Fact]
     public void 模型檔不存在時不擲例外_而是回報不可用()
     {

@@ -269,8 +269,14 @@ reliability 分箱的原始數字存在 metadata 的 `calibration.reliability_bi
 ## 11. 仍然沒有的東西
 
 - **訓練資料是模擬的。** 重複一次，因為它決定了其他所有數字怎麼被解讀。
-- **沒有模型監控、沒有重訓機制。** 模型檔是靜態的，資料漂移不會有人通知你。
-  規劃在 [`ml-dl-llm-strengthening-plan-v1.md`](ml-dl-llm-strengthening-plan-v1.md) 的 S5。
+- **沒有資料漂移監控、沒有重訓機制。** 模型檔是靜態的，線上輸入的分布變了不會有人通知你。
+  規劃在 [`ml-dl-llm-strengthening-plan-v1.md`](ml-dl-llm-strengthening-plan-v1.md) 的 S5，
+  MLflow 實驗追蹤與漂移偵測都還沒做——這部分等 S1/S2 有更多模型後再做才划算。
+  已經做掉的是 S5 提到的另一半：**模型檔與程式碼版本對不上時能不能當場看出來**
+  （2026-09-17）——`OnnxDelayRiskModel` 現在會比對 metadata 宣告的特徵順序跟
+  `WorkOrderDelayFeatures.FeatureNames`，對不上就停用預測（不是照跑一個算錯的機率），
+  `/api/ml/model-health` 把這個狀態（連同訓練日期、資料來源、樣本數、ROC AUC）
+  直接曝露出來，不用另外開一個 MLflow 才看得到。
 - **`WeeklyCapacityWorkOrders`（產線基準負載）是寫死的常數**，真實系統該從產能主檔取。
 - **OOD 只看單一特徵的邊界**，看不到「每個特徵都在範圍內、但這個組合沒出現過」
   那種多維度的分布外。要抓那種需要密度估計或 Mahalanobis 距離，

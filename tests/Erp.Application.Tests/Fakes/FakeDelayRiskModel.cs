@@ -22,6 +22,16 @@ public sealed class FakeDelayRiskModel(
 
     public bool IsCalibrated => false;
 
+    public bool FeatureSchemaConsistent => true;
+
+    public string? TrainedOn => null;
+
+    public string? DataSource => null;
+
+    public int? RowsTotal => null;
+
+    public double? RocAuc => null;
+
     public double PredictDelayProbability(WorkOrderDelayFeatures features)
     {
         if (!IsAvailable)
