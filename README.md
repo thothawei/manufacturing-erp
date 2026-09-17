@@ -201,6 +201,45 @@ OmniRoute 會補一個寫死 `(empty response)` 的 text 區塊（官方端點�
 AI 助理設定：模型 anthropic/claude-opus-5，端點 http://localhost:20128（server-side refusal fallback 關閉），工具迴圈上限 5 輪，逾時 60 秒，API 金鑰來源：設定檔或 user-secrets
 ```
 
+### 沒有真模型也要展示的話
+
+手邊沒有 Anthropic 金鑰、OmniRoute 也還沒連上能出 Claude 的 provider 時，
+AI 助理端點會回 503。這種情況下可以改指向本機的展示用 provider，
+整條 tool-use 迴圈照樣跑得起來，不需要任何金鑰、不花錢、不連外網：
+
+```bash
+# 終端機 A —— 展示用的本機 provider（吃自然語言，預設 8000 埠）
+STUB_PORT=8000 node scripts/demo-nl-provider.mjs
+```
+
+```bash
+# 終端機 B —— ERP 指向它（OmniRoute 的 vllm 連線預設就指著 localhost:8000/v1）
+ASPNETCORE_ENVIRONMENT=Development \
+AiAssistant__ApiKey="sk-local-stub" \
+AiAssistant__Model="vllm/erp-fake" \
+  dotnet run --project src/Erp.Api --urls http://localhost:5199
+```
+
+前提是 `omniroute` 要在另一個終端機跑著。起來之後 `/api/ai-assistant/ask` 就會回 200：
+
+```
+Q：面板還有多少可以用？
+A：面板（PANEL-01）目前帳上 100 片，其中 20 片 已被其他工單保留，
+   實際可動用的是 80 片。排產請以可用量為準，用帳上量會把別張工單的料重複算進來。
+```
+
+**哪些是真的、哪些是假的，用這條路徑展示時必須講清楚**：
+
+- **真的**：工具呼叫、資料庫查詢、回傳的每一個數字、tool-use 迴圈整條路徑、
+  gateway 的格式轉譯、角色過濾與錯誤契約。
+- **假的**：「挑哪個工具」是 `demo-nl-provider.mjs` 裡的關鍵字規則，
+  「把數字寫成句子」是它的 `compose()` 模板。接真模型時這兩件事改由模型做，
+  **中間的工具層與資料層一行都不用動**。
+
+跟 `scripts/fake-openai-provider.mjs` 的分工：那一支給 `e2e-omniroute.sh` 用，
+問句要明寫 `@@CALL` 指令，要的是可重複斷言；這一支吃自然語言，
+要的是展示畫面看起來就是「問一句話，它自己查完回答」。
+
 ### 改回直接打 Anthropic 官方
 
 `appsettings.json` 的 `AiAssistant` 拿掉 `BaseUrl`、`UseServerSideFallback` 設回 `true`、
