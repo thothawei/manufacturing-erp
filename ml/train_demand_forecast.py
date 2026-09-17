@@ -112,6 +112,35 @@ def build_features(df_item: pd.DataFrame, item_code: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+DRIFT_BINS = 10
+
+
+def drift_profile(x_train) -> dict:
+    """每個特徵的漂移偵測基準：分箱邊界 + 訓練集實際比例。跟 ml/train.py 的同名函式
+    是同一套設計（去重邊界、對訓練集重新算實際比例，不假設均勻分布），理由也一樣。
+    """
+    quantile_probs = np.linspace(0, 1, DRIFT_BINS + 1)[1:-1]
+    profile = {}
+
+    for i, name in enumerate(FEATURES):
+        column = x_train[:, i]
+        edges = sorted({round(float(v), 6) for v in np.quantile(column, quantile_probs)})
+
+        counts = [0] * (len(edges) + 1)
+        for value in column:
+            bin_index = 0
+            while bin_index < len(edges) and value > edges[bin_index]:
+                bin_index += 1
+            counts[bin_index] += 1
+
+        profile[name] = {
+            "edges": edges,
+            "proportions": [round(c / len(column), 6) for c in counts],
+        }
+
+    return profile
+
+
 def metrics_for(y_true, y_pred) -> dict:
     return {
         "mae": round(float(mean_absolute_error(y_true, y_pred)), 3),
@@ -219,6 +248,7 @@ def main() -> None:
         "rows_test": int(len(test)),
         "train_end_week": TRAIN_END_WEEK,
         "features": FEATURES,
+        "drift_profile": drift_profile(x_train),
         "comparison": {
             "method_note": (
                 "決勝負用逐品項 MAPE 的平均，不是整體 MAE——三個品項的需求量級差十幾倍，"

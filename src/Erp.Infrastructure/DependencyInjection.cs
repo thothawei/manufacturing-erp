@@ -59,14 +59,22 @@ public static class DependencyInjection
         return services;
     }
 
+    /// 最近推論記錄留幾筆才夠算 PSI：太少雜訊大、太多記憶體成本高，
+    /// 200 筆是刻意的折衷——足夠讓 10 個分箱每箱平均有 20 筆，PSI 的雜訊不會蓋過訊號。
+    private const int RecentPredictionLogCapacity = 200;
+
     /// 工單延遲風險預測。可選模組：模型檔載不起來時整個服務照常啟動，
     /// 只有預測功能會回報「沒有模型」—— 與 RAG 同一個模式。
     ///
     /// singleton 的理由：InferenceSession 建立成本高而且是執行緒安全的，
     /// 每個請求重建一次會把推論的延遲從微秒級推到毫秒級。
+    /// 同一個註冊順手把這個模型的最近推論記錄（S5 漂移偵測用）一起掛上，
+    /// 兩者共用生命週期，用的地方不用分別記得註冊兩次。
     public static IServiceCollection AddDelayRiskModel(this IServiceCollection services)
     {
         services.AddSingleton<IDelayRiskModel, OnnxDelayRiskModel>();
+        services.AddSingleton<IRecentPredictionLog<WorkOrderDelayFeatures>>(
+            new InMemoryRecentPredictionLog<WorkOrderDelayFeatures>(RecentPredictionLogCapacity));
         return services;
     }
 
@@ -74,6 +82,8 @@ public static class DependencyInjection
     public static IServiceCollection AddMaterialDemandForecastModel(this IServiceCollection services)
     {
         services.AddSingleton<IMaterialDemandForecastModel, OnnxMaterialDemandForecastModel>();
+        services.AddSingleton<IRecentPredictionLog<MaterialDemandForecastFeatures>>(
+            new InMemoryRecentPredictionLog<MaterialDemandForecastFeatures>(RecentPredictionLogCapacity));
         return services;
     }
 

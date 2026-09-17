@@ -25,4 +25,21 @@ public class ModelHealthEndpointTests(ErpApiFactory factory) : IClassFixture<Erp
         Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("trainedOn").GetString()));
         Assert.True(body.GetProperty("rocAuc").GetDouble() > 0);
     }
+
+    /// 這個測試方法本身沒有呼叫過 /api/work-orders/.../delay-risk，
+    /// 所以最近推論記錄一定是空的 —— 樣本數不到門檻時 drift 就該老實說「還無法判斷」，
+    /// 不能偷偷當成「沒有飄移」回傳一個看起來正常的空結果。
+    [Fact]
+    public async Task 樣本數不足時drift老實回報還無法判斷()
+    {
+        var response = await Client.GetAsync("/api/ml/model-health");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        var drift = body.GetProperty("drift");
+        Assert.False(drift.GetProperty("available").GetBoolean());
+        Assert.Equal(30, drift.GetProperty("minSampleSize").GetInt32());
+        Assert.True(drift.GetProperty("recentSampleCount").GetInt32() < 30);
+        Assert.Equal(JsonValueKind.Null, drift.GetProperty("perFeaturePsi").ValueKind);
+        Assert.Empty(drift.GetProperty("significantDriftFeatures").EnumerateArray());
+    }
 }

@@ -207,26 +207,43 @@ app.MapGet("/api/work-orders/{workOrderNo}/delay-risk", async (
         "模型對這種輸入照樣給得出機率，但可信度較低。" +
         "模型檔不存在時 predictedDelayProbability 為 null，規則式判斷照常可用。");
 
+// 樣本數門檻：PSI 在小樣本下雜訊很大（幾筆觀察就能把某一箱的比例推得很極端），
+// 30 不是統計上推導出來的臨界值，是「先求不要在樣本太少時誤報飄移」的工程判斷。
+const int MinDriftSampleSize = 30;
+
+// 跟 DependencyInjection.cs 的 RecentPredictionLogCapacity 對齊 ——
+// 環狀緩衝區本身就只留得住這麼多筆，要更多也拿不到，這裡寫死同一個數字只是明講意圖。
+const int DriftSampleWindow = 200;
+
 // 模型註冊／健康檢查（S5 的一部分，見 docs/ml-dl-llm-strengthening-plan-v1.md）。
 //
 // 這裡回答的是「現在載進來的是哪個模型、跟程式碼對不對得上」——
 // featureSchemaConsistent 是 false 時，available 也一定是 false：
 // 特徵順序對不上代表模型會把數值餵進錯的欄位，那不是「品質比較差」，
 // 是「這個結果沒有意義」，所以直接停用而不是照樣回傳一個機率。
-// 漂移監控與自動重訓刻意不做，理由跟 ml-risk-prediction-module-plan-v1.md 第 10 節一致：
+// 自動重訓刻意不做，理由跟 ml-risk-prediction-module-plan-v1.md 第 10 節一致：
 // 標籤延遲（工單要完工才知道有沒有延遲）讓「自動」重訓在這個規模下是假的。
-app.MapGet("/api/ml/model-health", (IDelayRiskModel model) => Results.Ok(new
-{
-    available = model.IsAvailable,
-    description = model.Description,
-    isCalibrated = model.IsCalibrated,
-    decisionThreshold = model.DecisionThreshold,
-    featureSchemaConsistent = model.FeatureSchemaConsistent,
-    trainedOn = model.TrainedOn,
-    dataSource = model.DataSource,
-    rowsTotal = model.RowsTotal,
-    rocAuc = model.RocAuc
-}))
+// 漂移「偵測」則有做（PSI，見下方 BuildDriftInfo）——偵測到了之後要不要重訓仍是人的判斷。
+app.MapGet("/api/ml/model-health", (
+        IDelayRiskModel model, IRecentPredictionLog<WorkOrderDelayFeatures> recentPredictionLog) =>
+    {
+        var recent = recentPredictionLog.GetRecent(DriftSampleWindow);
+        var drift = BuildDriftInfo(recent.Count, recent.Count < MinDriftSampleSize ? null : model.ComputeDrift(recent));
+
+        return Results.Ok(new
+        {
+            available = model.IsAvailable,
+            description = model.Description,
+            isCalibrated = model.IsCalibrated,
+            decisionThreshold = model.DecisionThreshold,
+            featureSchemaConsistent = model.FeatureSchemaConsistent,
+            trainedOn = model.TrainedOn,
+            dataSource = model.DataSource,
+            rowsTotal = model.RowsTotal,
+            rocAuc = model.RocAuc,
+            drift
+        });
+    })
     .WithSummary("延遲風險模型的註冊資訊與健康狀態")
     .WithDescription(
         "回答「現在載進來的是哪個模型、可不可信」，不是延遲風險預測本身" +
@@ -234,7 +251,9 @@ app.MapGet("/api/ml/model-health", (IDelayRiskModel model) => Results.Ok(new
         "featureSchemaConsistent 為 false 時 available 必定也是 false —— " +
         "特徵順序與程式碼對不上時，模型會把數值餵進錯的欄位，" +
         "為避免回傳一個外觀正常但語意錯誤的機率，直接停用預測。" +
-        "沒有模型檔時多數欄位為 null，description 會說明原因。");
+        "沒有模型檔時多數欄位為 null，description 會說明原因。" +
+        "drift 是最近一批推論輸入跟訓練分布的 PSI 比較（見 drift.note），" +
+        "樣本數不夠時 drift.available 為 false，不代表沒有飄移，是還無法判斷。");
 
 // 採購建議的人工確認流程。
 //
@@ -351,7 +370,8 @@ app.MapGet("/api/quality/summary", async (
 // 沒有地方可以在伺服器這一側查出來，只能由呼叫端算好、隨請求提供。
 // 這不是偷懶少做一步，是誠實反映「這個資料還不存在」——見上面文件第 5 節的說明。
 app.MapPost("/api/ml/demand-forecast", (
-        DemandForecastRequest request, IMaterialDemandForecastModel model) =>
+        DemandForecastRequest request, IMaterialDemandForecastModel model,
+        IRecentPredictionLog<MaterialDemandForecastFeatures> recentPredictionLog) =>
     {
         if (!MaterialDemandForecastFeatures.KnownItems.Contains(request.ItemCode))
         {
@@ -365,6 +385,10 @@ app.MapPost("/api/ml/demand-forecast", (
         var features = MaterialDemandForecastFeatures.ForItem(
             request.ItemCode, request.Lag1, request.Lag2, request.Lag3, request.Lag4, request.Lag52,
             request.RollingMean4, request.RollingMean12, request.WeekOfYear);
+
+        // 漂移偵測（S5）要看的是線上實際收到的輸入，跟模型當下可不可用是兩件事，
+        // 理由跟 WorkOrderDelayRiskPredictionService 那邊一樣，記錄不等預測成功再做
+        recentPredictionLog.Record(features);
 
         return Results.Ok(new
         {
@@ -388,7 +412,87 @@ app.MapPost("/api/ml/demand-forecast", (
         "itemCode 只認得三個訓練過的料號，其餘一律回 400。" +
         "**訓練資料是模擬的，不是真實產線資料。**");
 
+// 物料需求預測模型的註冊資訊與健康狀態，跟延遲風險那邊的 /api/ml/model-health 對稱（S5）。
+// 拆成獨立端點而不是塞進 /api/ml/demand-forecast 的回應，理由是後者需要呼叫端提供特徵
+// 才問得出來，而「模型現在健不健康、最近有沒有飄移」是即使沒人在預測也該問得到的狀態。
+app.MapGet("/api/ml/demand-forecast-health", (
+        IMaterialDemandForecastModel model,
+        IRecentPredictionLog<MaterialDemandForecastFeatures> recentPredictionLog) =>
+    {
+        var recent = recentPredictionLog.GetRecent(DriftSampleWindow);
+        var drift = BuildDriftInfo(recent.Count, recent.Count < MinDriftSampleSize ? null : model.ComputeDrift(recent));
+
+        return Results.Ok(new
+        {
+            available = model.IsAvailable,
+            description = model.Description,
+            featureSchemaConsistent = model.FeatureSchemaConsistent,
+            trainedOn = model.TrainedOn,
+            winnerByMape = model.WinnerByMape,
+            deployedModel = model.DeployedModel,
+            drift
+        });
+    })
+    .WithSummary("物料需求預測模型的註冊資訊與健康狀態")
+    .WithDescription(
+        "回答「現在載進來的是哪個模型、可不可信」，不是需求預測本身" +
+        "（預測請用 POST /api/ml/demand-forecast）。" +
+        "featureSchemaConsistent 為 false 時 available 必定也是 false，理由與延遲風險模型一致。" +
+        "drift 是最近一批推論輸入跟訓練分布的 PSI 比較，樣本數不夠時 drift.available 為 false。");
+
 app.Run();
+
+// model-health 與 demand-forecast-health 共用同一套「樣本夠不夠、飄移嚴不嚴重」判讀邏輯，
+// 避免兩個端點各寫一份、之後改門檻只改到一邊。
+static object BuildDriftInfo(int recentSampleCount, IReadOnlyDictionary<string, double>? perFeaturePsi)
+{
+    if (recentSampleCount < MinDriftSampleSize)
+    {
+        return new
+        {
+            available = false,
+            recentSampleCount,
+            minSampleSize = MinDriftSampleSize,
+            perFeaturePsi = (IReadOnlyDictionary<string, double>?)null,
+            significantDriftFeatures = Array.Empty<string>(),
+            note = $"最近推論樣本數（{recentSampleCount}）還不到 {MinDriftSampleSize} 筆，" +
+                "PSI 在小樣本下不穩定，先不計算——這不代表沒有飄移，是還無法判斷。"
+        };
+    }
+
+    if (perFeaturePsi is null)
+    {
+        return new
+        {
+            available = false,
+            recentSampleCount,
+            minSampleSize = MinDriftSampleSize,
+            perFeaturePsi = (IReadOnlyDictionary<string, double>?)null,
+            significantDriftFeatures = Array.Empty<string>(),
+            note = "模型沒有 metadata（或 metadata 裡沒有 drift bin edges），沒有訓練分布可以比較。"
+        };
+    }
+
+    var significant = perFeaturePsi
+        .Where(kv => kv.Value >= PsiCalculator.SignificantThreshold)
+        .Select(kv => kv.Key)
+        .ToArray();
+
+    return new
+    {
+        available = true,
+        recentSampleCount,
+        minSampleSize = MinDriftSampleSize,
+        perFeaturePsi,
+        significantDriftFeatures = significant,
+        note = $"PSI < {PsiCalculator.ModerateThreshold} 沒有顯著變化、" +
+            $"{PsiCalculator.ModerateThreshold}~{PsiCalculator.SignificantThreshold} 中度飄移值得留意、" +
+            $">= {PsiCalculator.SignificantThreshold} 顯著飄移（訓練分布可能已經不能代表現在的輸入）。" +
+            (significant.Length > 0
+                ? $" 目前有 {significant.Length} 個特徵超過顯著門檻：{string.Join("、", significant)}。"
+                : " 目前沒有特徵超過顯著門檻。")
+    };
+}
 
 // 讓整合測試能參考這個 Program 類別
 public partial class Program;

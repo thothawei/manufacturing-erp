@@ -115,6 +115,51 @@ public class MaterialDemandForecastModelTests
         Assert.Contains(model.WinnerByMape!, new[] { "seasonal_naive", "gbdt", "mlp" });
     }
 
+    /// 跟 DelayRiskModelTests 的同名測試同一個理由：逐特徵用模型真正載入的
+    /// DriftProfile 構造完全複製訓練比例的觀察值，PSI 應該趨近於零。
+    [Fact]
+    public void 觀察值完全複製訓練比例時_每個特徵的PSI都趨近於零()
+    {
+        using var model = CreateModel();
+        var profiles = model.Metadata!.DriftProfile!;
+
+        foreach (var (feature, profile) in profiles)
+        {
+            var recent = DriftTestHelpers.ReproduceProportions(profile);
+
+            var psi = PsiCalculator.Compute(profile.Edges, profile.Proportions, recent);
+
+            Assert.True(psi < 1e-6, $"{feature} 的 PSI 是 {psi}，觀察值完全複製訓練比例時應該趨近於零");
+        }
+    }
+
+    /// 反向驗證：跟上一條對照，證明真的偏移的資料會被抓到，不是這個防線量不到任何東西
+    [Fact]
+    public void 觀察值全部擠在訓練分布的同一端時_至少一個特徵的PSI超過顯著門檻()
+    {
+        using var model = CreateModel();
+
+        var skewed = Enumerable.Repeat(
+            new MaterialDemandForecastFeatures(
+                Lag1: 0, Lag2: 0, Lag3: 0, Lag4: 0, Lag52: 0,
+                RollingMean4: 0, RollingMean12: 0, WeekOfYear: 0,
+                ItemIsPanel01: 0, ItemIsScrew05: 0, ItemIsCable07: 0),
+            40).ToList();
+
+        var drift = model.ComputeDrift(skewed);
+
+        Assert.NotNull(drift);
+        Assert.Contains(drift!.Values, psi => psi > PsiCalculator.SignificantThreshold);
+    }
+
+    [Fact]
+    public void 沒有觀察值時回傳null_而不是零()
+    {
+        using var model = CreateModel();
+
+        Assert.Null(model.ComputeDrift([]));
+    }
+
     private static MaterialDemandForecastFeatures ToFeatures(IReadOnlyList<float> v)
         => new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], (int)v[7], v[8], v[9], v[10]);
 }

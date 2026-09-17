@@ -18,6 +18,7 @@ public class WorkOrderDelayRiskPredictionServiceTests
     private static readonly DateOnly Today = new(2026, 9, 10);
 
     private FakeDelayRiskModel _model = null!;
+    private FakeRecentPredictionLog<WorkOrderDelayFeatures> _recentPredictionLog = null!;
 
     private WorkOrderDelayRiskPredictionService CreateService(
         IEnumerable<WorkOrder> workOrders,
@@ -33,11 +34,12 @@ public class WorkOrderDelayRiskPredictionServiceTests
         var clock = new FakeClock(Today);
 
         _model = new FakeDelayRiskModel(modelAvailable, outOfDistribution: outOfDistribution);
+        _recentPredictionLog = new FakeRecentPredictionLog<WorkOrderDelayFeatures>();
 
         return new WorkOrderDelayRiskPredictionService(
             workOrderRepo, itemRepo, bomService,
             new WorkOrderRiskService(workOrderRepo, itemRepo, bomService, clock),
-            _model, clock);
+            _model, _recentPredictionLog, clock);
     }
 
     private static WorkOrder Wo(string no, DateOnly due, decimal qty = 100m,
@@ -182,6 +184,37 @@ public class WorkOrderDelayRiskPredictionServiceTests
         Assert.Null(result.ExceedsThreshold);
         Assert.Equal(2, result.RuleBasedDelayDays);
         Assert.Contains("模型不可用", result.Note);
+    }
+
+    /// 漂移偵測（S5）要看的是「線上實際收到的輸入」，跟模型當不當下可用是兩件事——
+    /// 這條釘的正是這個：模型不可用時特徵仍然要被記錄下來，不然模型修好那一刻，
+    /// 之前累積的輸入分布資訊已經永遠遺失了。
+    [Fact]
+    public async Task 模型不可用時特徵仍然會被記錄下來供漂移偵測用()
+    {
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13))],
+            [],
+            [TestData.Balance("PANEL-01", 80m), TestData.Balance("SCREW-05", 100_000m)],
+            modelAvailable: false);
+
+        await service.CompareAsync("WO-01");
+
+        Assert.Single(_recentPredictionLog.Recorded);
+    }
+
+    [Fact]
+    public async Task 每次呼叫都會把特徵記錄進最近推論記錄()
+    {
+        var service = CreateService(
+            [Wo("WO-01", new DateOnly(2026, 9, 13)), Wo("WO-02", new DateOnly(2026, 9, 20))],
+            [],
+            [TestData.Balance("PANEL-01", 80m), TestData.Balance("SCREW-05", 100_000m)]);
+
+        await service.CompareAsync("WO-01");
+        await service.CompareAsync("WO-02");
+
+        Assert.Equal(2, _recentPredictionLog.Recorded.Count);
     }
 
     [Fact]

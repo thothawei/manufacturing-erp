@@ -183,6 +183,17 @@ ml/.venv/bin/mlflow ui --backend-store-uri ml/mlruns
 使用者永遠不會自然問出、模型也答不出來的工具。等這個系統真的有歷史需求資料
 可以查的時候，再讓它加入工具清單會更有意義。
 
+**另外新增 `GET /api/ml/demand-forecast-health`**（2026-09-17，S5 的一部分，見
+[`ml-dl-llm-strengthening-plan-v1.md`](ml-dl-llm-strengthening-plan-v1.md)），
+跟延遲風險模型的 `/api/ml/model-health` 對稱：回傳 `available`／`featureSchemaConsistent`／
+`trainedOn`／`winnerByMape`／`deployedModel`，以及 PSI 漂移分數。拆成獨立端點而不是塞進
+`/api/ml/demand-forecast` 的回應，理由是後者需要呼叫端提供特徵才問得出來，而「模型現在
+健不健康、最近有沒有飄移」是即使沒人在預測也該問得到的狀態。`IRecentPredictionLog
+<MaterialDemandForecastFeatures>`（容量 200 的環狀緩衝區）記下每次 `POST
+/api/ml/demand-forecast` 收到的特徵，樣本數不到 30 筆時 `drift.available` 為
+`false`——這不是「沒有飄移」，是「還無法判斷」。分箱邊界與 PSI 計算方式跟延遲風險
+模型共用同一套 `PsiCalculator`，細節見 `ml-dl-llm-strengthening-plan-v1.md` S5。
+
 ## 10. 仍然沒有的東西
 
 - **沒有真的歷史需求資料，也沒有地方存**：這是最根本的缺口。要讓這個端點

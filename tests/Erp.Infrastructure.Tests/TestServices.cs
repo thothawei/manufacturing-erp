@@ -27,7 +27,8 @@ internal static class TestServices
         ILogger<ToolDispatcher>? logger = null,
         IEmbeddingClient? embeddingClient = null,
         RagOptions? ragOptions = null,
-        IDelayRiskModel? delayRiskModel = null)
+        IDelayRiskModel? delayRiskModel = null,
+        IRecentPredictionLog<WorkOrderDelayFeatures>? recentPredictionLog = null)
     {
         var db = fixture.CreateContext();
 
@@ -61,7 +62,9 @@ internal static class TestServices
                 clock),
             new WorkOrderDelayRiskPredictionService(
                 workOrderRepository, itemRepository, bomExplosionService, workOrderRiskService,
-                delayRiskModel ?? CreateDelayRiskModel(), clock),
+                delayRiskModel ?? CreateDelayRiskModel(),
+                recentPredictionLog ?? new InMemoryRecentPredictionLog<WorkOrderDelayFeatures>(200),
+                clock),
             new QualityInspectionQueryService(new QualityInspectionRepository(db)),
             CreateSearchService(fixture, embeddingClient ?? new FakeEmbeddingClient(), ragOptions),
             logger ?? NullLogger<ToolDispatcher>.Instance);

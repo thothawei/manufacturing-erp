@@ -33,4 +33,10 @@ public interface IMaterialDemandForecastModel
     /// 預測下一週的需求量。特徵必須由呼叫端算好提供 —— 這個系統目前沒有持久化
     /// 歷史週別需求，模型本身不會、也不能自己去查。
     double PredictDemand(MaterialDemandForecastFeatures features);
+
+    /// 用最近一批推論請求的特徵，逐特徵算 PSI 漂移分數（S5）。
+    /// 沒有 metadata（或沒有 drift bin edges）時回 null，理由與 IDelayRiskModel 的
+    /// 同名成員一致：沒有訓練分布就無從比較，不是「沒有飄移」。
+    IReadOnlyDictionary<string, double>? ComputeDrift(
+        IReadOnlyList<MaterialDemandForecastFeatures> recentObservations);
 }

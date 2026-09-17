@@ -69,4 +69,14 @@ public interface IDelayRiskModel
     /// —— 但那種情況下 Description 已經說了「沒有 metadata」。
     IReadOnlyList<OutOfDistributionFeature> FindOutOfDistributionFeatures(
         WorkOrderDelayFeatures features);
+
+    /// 用最近一批推論請求的特徵，逐特徵算 PSI 漂移分數（S5）。
+    ///
+    /// 跟 FindOutOfDistributionFeatures 是不同的問題：那個問「這一筆輸入正不正常」，
+    /// 這個問「最近一段時間的輸入，整體分布是不是已經跟訓練當下不一樣了」——
+    /// 每一筆單獨看都正常，也可能整批已經一致地往同一個方向偏移。
+    /// 沒有 metadata（或沒有 drift bin edges）時回 null，理由跟 OOD 檢查一樣：
+    /// 沒有訓練分布就無從比較，不是「沒有飄移」。
+    IReadOnlyDictionary<string, double>? ComputeDrift(
+        IReadOnlyList<WorkOrderDelayFeatures> recentObservations);
 }

@@ -19,9 +19,9 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 ![Scalar API 文件](docs/images/scalar-overview.png)
 
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
-十八個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
+十九個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-433 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 457；
+450 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 474；
 沒裝時它們標記為 6 個 skip，另有 5 個接真實 Anthropic API 的測試同樣 skip）。
 
 **還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
@@ -121,7 +121,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 ```
 
 啟動後開 **http://localhost:5199/scalar/v1** 是互動式 API 文件（Scalar）：
-十八個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
+十九個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打，不必寫 curl。
 只在開發環境開放 —— 正式環境不需要把端點結構公開出去。
 
 資料庫是 SQLite 檔（`src/Erp.Api/erp.db`），刪掉再啟動就會重新產生一份乾淨的展示資料。
@@ -720,7 +720,7 @@ ROC AUC 是 0.7386 而不是 0.99：生成規則裡有 5% 標籤翻轉，延遲�
 `WorkOrderDelayFeatures.FeatureNames`，對不上就把 `IsAvailable` 判定為 false，
 預測請求會得到「沒有模型」而不是一個看起來合理但錯位算出來的數字。
 `/api/ml/model-health` 端點把這個狀態（連同 `isCalibrated`、`decisionThreshold`、
-`trainedOn`、`dataSource`、`rowsTotal`、`rocAuc`）曝露出來：
+`trainedOn`、`dataSource`、`rowsTotal`、`rocAuc`，以及下面的 PSI 漂移分數）曝露出來：
 
 ```bash
 curl "http://localhost:5199/api/ml/model-health"
@@ -730,14 +730,30 @@ curl "http://localhost:5199/api/ml/model-health"
 {"available":true,"description":"logistic regression，訓練於 2026-09-16，…",
  "isCalibrated":false,"decisionThreshold":0.26,"featureSchemaConsistent":true,
  "trainedOn":"2026-09-16","dataSource":"模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
- "rowsTotal":1200,"rocAuc":0.7386}
+ "rowsTotal":1200,"rocAuc":0.7386,
+ "drift":{"available":false,"recentSampleCount":0,"minSampleSize":30,
+          "perFeaturePsi":null,"significantDriftFeatures":[],
+          "note":"最近推論樣本數（0）還不到 30 筆，PSI 在小樣本下不穩定，先不計算——這不代表沒有飄移，是還無法判斷。"}}
 ```
 
 這是 [`ml-dl-llm-strengthening-plan-v1.md`](docs/ml-dl-llm-strengthening-plan-v1.md) S5
 （模型生命週期／MLOps）裡「模型檔與程式碼版本對不上時要能當場看出來」那一小塊，
-先做的理由跟 S4 一樣：不需要下載任何預訓練權重。S5 其餘的部分（MLflow 實驗追蹤、
-PSI 漂移偵測）還沒做——前者要有第二個模型才划算比較，後者需要先有一層推論請求的
-特徵記錄，兩者都留給之後。
+先做的理由跟 S4 一樣：不需要下載任何預訓練權重。
+
+**PSI（Population Stability Index）漂移偵測**是 S5 剩下的那一塊，現在也做了：
+`WorkOrderDelayRiskPredictionService` 每次算特徵都會把它記進一個有界的環狀緩衝區
+（`IRecentPredictionLog<T>`，容量 200，跟 `InMemoryConversationStore` 是同一種模式），
+`/api/ml/model-health` 逐特徵拿這批最近觀察值跟訓練時存的分箱比例算 PSI。
+**分箱邊界不能假設均勻**：`item_overdue_rate` 這種低基數特徵在真實訓練資料裡只有
+5 種值，10 等分位數切出來的邊界會重複，訓練腳本（`drift_profile`，見 `ml/train.py`）
+因此改成先去重邊界、再對訓練集重新算一次實際比例，而不是假設每箱 1/10 —— 這是寫測試
+時撞到的真實案例，用均勻假設會把完全正常的資料誤判成飄移（見 `PsiCalculatorTests`）。
+樣本數不到 30 筆時 `drift.available` 為 `false`，理由跟分布外特徵檢查一樣：
+沒有足夠樣本不是「沒有飄移」，是「還無法判斷」。門檻是業界慣用的經驗法則
+（&lt; 0.1 沒有顯著變化、0.1~0.2 中度飄移、≥ 0.2 顯著飄移），不是統計顯著性檢定。
+物料需求預測模型（S6）有對稱的 `/api/ml/demand-forecast-health` 端點。
+自動重訓仍然刻意不做，理由見 `ml-risk-prediction-module-plan-v1.md` 第 10 節——
+標籤延遲讓「自動」在這個規模下是假的；PSI 偵測到飄移之後要不要重訓，是人的判斷。
 
 ### 重新訓練
 
@@ -900,14 +916,14 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-433 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
-跑起來共 457 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
+450 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 474 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
-| `Erp.Application.Tests` | 105 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算、模擬資料生成器），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 277（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）、物料需求預測模型（S6）；另有接真實模型的檢索品質與端到端評測測試 |
-| `Erp.Api.Tests` | 39 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動、ML 模型註冊健康檢查、物料需求預測端點（`WebApplicationFactory`） |
+| `Erp.Application.Tests` | 113 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算、模擬資料生成器、PSI 漂移分數計算），用 in-memory 假 Repository |
+| `Erp.Infrastructure.Tests` | 283（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）、物料需求預測模型（S6）、兩個 ML 模型的 PSI 漂移偵測（重現訓練分布時 PSI≈0、極端值時超過顯著門檻，S5）；另有接真實模型的檢索品質與端到端評測測試 |
+| `Erp.Api.Tests` | 42 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動、兩個 ML 模型的註冊健康檢查與 PSI 漂移偵測、物料需求預測端點（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
 **「30 個」與「6 個 skip」是同一組測試**：`OllamaTheory` 在 skip 時不展開
@@ -1108,7 +1124,9 @@ curl "http://localhost:5199/api/mrp/shortages"
   機率校準也評估過了，結論是不採用 —— Platt 與 isotonic 的 ΔBrier 95% bootstrap 區間都跨 0，
   這 300 筆測試資料分不出差別，所以機率維持未校準、只當排序用。
   模型檔與程式碼版本對不上時也會被抓到（2026-09-17 補上，見「第四道防線」），
-  仍然沒有的是資料漂移監控與自動重訓機制。完整清單在
+  PSI 漂移偵測也補上了（見「第四道防線」下一段），仍然沒有的是自動重訓機制——
+  偵測到飄移之後要不要重訓、怎麼重訓，是人的判斷，理由跟不做自動重訓一致
+  （標籤延遲讓「自動」在這個規模下是假的）。完整清單在
   [`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)。
 - **系統裡沒有任何地方持久化歷史週別物料需求**：物料需求時間序列預測（S6）的
   `/api/ml/demand-forecast` 因此得靠呼叫端自己提供 lag 特徵，不是伺服器從資料庫查出來的——

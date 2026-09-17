@@ -45,4 +45,7 @@ public sealed class FakeDelayRiskModel(
 
     public IReadOnlyList<OutOfDistributionFeature> FindOutOfDistributionFeatures(
         WorkOrderDelayFeatures features) => outOfDistribution ?? [];
+
+    public IReadOnlyDictionary<string, double>? ComputeDrift(
+        IReadOnlyList<WorkOrderDelayFeatures> recentObservations) => null;
 }

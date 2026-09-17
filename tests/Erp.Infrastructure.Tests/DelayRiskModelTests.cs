@@ -233,6 +233,64 @@ public class DelayRiskModelTests
         }
     }
 
+    /// **這是漂移偵測的重點。**
+    ///
+    /// 每個特徵各自的分箱數不同（低基數特徵去重後箱數比 10 少），沒辦法用同一組
+    /// WorkOrderDelayFeatures 記錄同時讓七個特徵都對齊各自的箱數，所以這條直接用
+    /// 模型真正載進來的 DriftProfile，逐特徵構造「完全複製訓練比例」的觀察值，
+    /// 驗 PsiCalculator 接的是這個模型真實的（可能是去重、非均勻的）漂移基準，
+    /// 不是憑空造一組理想化的邊界。
+    [Fact]
+    public void 觀察值完全複製訓練比例時_每個特徵的PSI都趨近於零()
+    {
+        using var model = CreateModel();
+        var profiles = model.Metadata!.DriftProfile!;
+
+        foreach (var (feature, profile) in profiles)
+        {
+            var recent = DriftTestHelpers.ReproduceProportions(profile);
+
+            var psi = PsiCalculator.Compute(profile.Edges, profile.Proportions, recent);
+
+            Assert.True(psi < 1e-6, $"{feature} 的 PSI 是 {psi}，觀察值完全複製訓練比例時應該趨近於零");
+        }
+    }
+
+    /// 反向驗證：上一條測試證明「像訓練分布的資料 PSI 低」，這條證明「真的偏移的資料
+    /// PSI 會高」——兩者對照才證明這個防線量得到東西，不是隨便算一個都會過的數字。
+    [Fact]
+    public void 觀察值全部擠在訓練分布的同一端時_至少一個特徵的PSI超過顯著門檻()
+    {
+        using var model = CreateModel();
+        var ranges = model.Metadata!.FeatureRanges!;
+
+        // 全部釘在每個特徵訓練範圍的最小值——真實情境類似「上游系統壞掉、
+        // 每個請求的某個欄位都變成 0 或最小值」
+        var skewed = Enumerable.Repeat(
+            new WorkOrderDelayFeatures(
+                MaterialReadiness: ranges["material_readiness"].Min,
+                DaysUntilDue: ranges["days_until_due"].Min,
+                MaxLeadTimeDays: ranges["max_lead_time_days"].Min,
+                ProgressRatio: ranges["progress_ratio"].Min,
+                ItemOverdueRate: ranges["item_overdue_rate"].Min,
+                WeeklyLoadRatio: ranges["weekly_load_ratio"].Min,
+                BomComponentCount: ranges["bom_component_count"].Min),
+            40).ToList();
+
+        var drift = model.ComputeDrift(skewed);
+
+        Assert.NotNull(drift);
+        Assert.Contains(drift!.Values, psi => psi > PsiCalculator.SignificantThreshold);
+    }
+
+    [Fact]
+    public void 沒有觀察值時回傳null_而不是零()
+    {
+        using var model = CreateModel();
+
+        Assert.Null(model.ComputeDrift([]));
+    }
+
     private static WorkOrderDelayFeatures ToFeatures(IReadOnlyList<float> v)
         => new(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
 }

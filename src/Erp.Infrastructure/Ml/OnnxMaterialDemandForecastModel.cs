@@ -33,6 +33,7 @@ public sealed record MaterialDemandForecastMetadata(
     int RowsTest,
     int TrainEndWeek,
     IReadOnlyList<string> Features,
+    IReadOnlyDictionary<string, DriftProfile>? DriftProfile,
     DemandForecastComparison Comparison,
     string DeployedModel,
     string DeploymentNote,
@@ -138,6 +139,33 @@ public sealed class OnnxMaterialDemandForecastModel : IMaterialDemandForecastMod
         using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, tensor)]);
 
         return results.First().AsTensor<float>()[0, 0];
+    }
+
+    /// PSI 漂移偵測。沒有漂移基準（drift profile）時無從比較，回 null（不是「沒有飄移」）。
+    public IReadOnlyDictionary<string, double>? ComputeDrift(
+        IReadOnlyList<MaterialDemandForecastFeatures> recentObservations)
+    {
+        if (Metadata?.DriftProfile is not { Count: > 0 } profiles || recentObservations.Count == 0)
+        {
+            return null;
+        }
+
+        var names = MaterialDemandForecastFeatures.FeatureNames;
+        var vectors = recentObservations.Select(f => f.ToVector()).ToList();
+        var result = new Dictionary<string, double>();
+
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (!profiles.TryGetValue(names[i], out var profile))
+            {
+                continue;
+            }
+
+            var recentValues = vectors.Select(v => (double)v[i]).ToList();
+            result[names[i]] = PsiCalculator.Compute(profile.Edges, profile.Proportions, recentValues);
+        }
+
+        return result;
     }
 
     public void Dispose() => _session?.Dispose();

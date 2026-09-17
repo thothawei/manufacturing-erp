@@ -269,10 +269,18 @@ reliability 分箱的原始數字存在 metadata 的 `calibration.reliability_bi
 ## 11. 仍然沒有的東西
 
 - **訓練資料是模擬的。** 重複一次，因為它決定了其他所有數字怎麼被解讀。
-- **沒有資料漂移監控、沒有重訓機制。** 模型檔是靜態的，線上輸入的分布變了不會有人通知你。
-  規劃在 [`ml-dl-llm-strengthening-plan-v1.md`](ml-dl-llm-strengthening-plan-v1.md) 的 S5，
-  漂移偵測需要先加一層推論請求的特徵記錄，還沒做。
-  已經做掉的是另外兩塊：**模型檔與程式碼版本對不上時能不能當場看出來**
+- **沒有自動重訓機制。** 標籤延遲（工單要完工才知道有沒有延遲）讓「自動」在這個規模
+  是假的，這件事跟第 2 節的誠實界線一致，刻意不做。
+  資料漂移監控已經做了（2026-09-17，S5，見
+  [`ml-dl-llm-strengthening-plan-v1.md`](ml-dl-llm-strengthening-plan-v1.md)）：
+  `IRecentPredictionLog<WorkOrderDelayFeatures>` 記下每次推論請求算出來的特徵
+  （容量 200 的環狀緩衝區），`/api/ml/model-health` 逐特徵拿這批最近觀察值跟訓練時
+  存的分箱比例算 PSI，樣本數不到 30 筆時老實說「還無法判斷」而不是假裝沒有飄移。
+  分箱邊界訓練時就算好、存進 metadata，而且不能假設均勻分布——低基數特徵
+  （例如 `item_overdue_rate`）分位數切點會重複，訓練腳本因此改成先去重再算實際比例，
+  這是寫測試時撞到的真實案例。**PSI 偵測到飄移之後要不要重訓，仍然是人的判斷**，
+  這一步沒有、也不打算自動化。
+  另外做掉的是**模型檔與程式碼版本對不上時能不能當場看出來**
   （2026-09-17）——`OnnxDelayRiskModel` 現在會比對 metadata 宣告的特徵順序跟
   `WorkOrderDelayFeatures.FeatureNames`，對不上就停用預測（不是照跑一個算錯的機率），
   `/api/ml/model-health` 把這個狀態（連同訓練日期、資料來源、樣本數、ROC AUC）

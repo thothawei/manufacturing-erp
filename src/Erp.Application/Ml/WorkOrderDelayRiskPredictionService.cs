@@ -42,6 +42,7 @@ public sealed class WorkOrderDelayRiskPredictionService(
     BomExplosionService bomExplosionService,
     WorkOrderRiskService workOrderRiskService,
     IDelayRiskModel model,
+    IRecentPredictionLog<WorkOrderDelayFeatures> recentPredictionLog,
     IClock clock)
 {
     /// 產線一週的基準工單數。除以它是為了讓「負載」變成一個沒有單位的比值，
@@ -67,6 +68,14 @@ public sealed class WorkOrderDelayRiskPredictionService(
             .FirstOrDefault(r => r.WorkOrderNo == workOrderNo);
 
         var features = await BuildFeaturesAsync(workOrder, ct);
+
+        // 漂移偵測要看的是「線上實際收到的輸入長什麼樣」，
+        // 跟模型當下可不可用是兩件事——模型停用時的輸入分布照樣有記錄的價值，
+        // 之後模型修好了才有資料可以立刻回答「這段時間輸入有沒有跟訓練分布不一樣」。
+        if (features is not null)
+        {
+            recentPredictionLog.Record(features);
+        }
 
         double? probability = null;
         bool? exceeds = null;

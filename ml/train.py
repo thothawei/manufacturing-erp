@@ -222,6 +222,40 @@ def evaluate_calibration(base_model, x_train, y_train, x_test, y_test, probabili
     }
 
 
+DRIFT_BINS = 10
+
+
+def drift_profile(x_train) -> dict:
+    """每個特徵的漂移偵測基準：分箱邊界 + 訓練集在每一箱的實際比例，給線上算 PSI 用。
+
+    邊界先用 10 等頻分位數切，但**重複值要去掉再對訓練集重新分箱算真正比例**，
+    不能假設每箱一定是 1/DRIFT_BINS —— 低基數的類別型特徵（例如 item_overdue_rate
+    全資料集只有 5 種不同值）九個分位數切點會切出重複值，這時候「等頻」的前提
+    已經不成立，還硬套均勻分布會讓正常資料被誤判成飄移（這是寫測試時撞到的真實案例，
+    不是預想出來的邊界情況）。去重後對訓練集重新算一次比例，離散或連續特徵都算得對。
+    """
+    quantile_probs = np.linspace(0, 1, DRIFT_BINS + 1)[1:-1]
+    profile = {}
+
+    for i, name in enumerate(FEATURES):
+        column = x_train[:, i]
+        edges = sorted({round(float(v), 6) for v in np.quantile(column, quantile_probs)})
+
+        counts = [0] * (len(edges) + 1)
+        for value in column:
+            bin_index = 0
+            while bin_index < len(edges) and value > edges[bin_index]:
+                bin_index += 1
+            counts[bin_index] += 1
+
+        profile[name] = {
+            "edges": edges,
+            "proportions": [round(c / len(column), 6) for c in counts],
+        }
+
+    return profile
+
+
 def distribution_bounds(x_train) -> dict:
     """訓練資料每個特徵的分布邊界，給線上推論做分布外（OOD）檢查用。
 
@@ -344,6 +378,7 @@ def main() -> None:
         "intercept": round(float(model.named_steps["classifier"].intercept_[0]), 4),
         "calibration": calibration,
         "feature_ranges": distribution_bounds(x_train),
+        "drift_profile": drift_profile(x_train),
         "golden_samples": golden,
     }
 
