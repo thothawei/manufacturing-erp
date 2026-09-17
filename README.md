@@ -21,8 +21,8 @@ Clean Architecture 分層的製造業 ERP，含一個以 tool-use 驅動的 AI �
 不想打 curl 的話，啟動後開 http://localhost:5199/scalar/v1 就是上面這個介面 ——
 十六個端點都有中文說明與參數型別，可以直接在瀏覽器裡試打。
 
-405 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 435；
-沒裝時它們標記為 6 個 skip，另有 3 個接真實 Anthropic API 的測試同樣 skip）。
+413 個測試通過、0 警告（本機裝了 Ollama 之後檢索品質那組會真的跑，共 443；
+沒裝時它們標記為 6 個 skip，另有 5 個接真實 Anthropic API 的測試同樣 skip）。
 
 **還沒對真的模型發過請求**：`AnthropicLlmClient` 送出的 HTTP 請求內容已用本機
 假伺服器逐欄檢查，整條路徑也實跑通過一次 —— `/api/ai-assistant/ask` → tool-use 迴圈
@@ -413,6 +413,25 @@ dotnet test tests/Erp.Infrastructure.Tests \
 請求有沒有被接受、該用的工具有沒有被選到、回答裡的數字是不是工具回傳的那一個。
 通過時會把逐輪對話寫成 `docs/verification/` 底下的純文字紀錄（金鑰已遮蔽），
 讓這次驗證可以被歸檔，而不是跑完就散在 console 裡。
+
+`AnthropicLiveApiTests` 釘的是 3 個具體情境；`AgentEvaluationTests`（`AgentEvaluationHarness` +
+`AgentEvaluationSet`，見 [`ml-dl-llm-strengthening-plan-v1.md` S4](docs/ml-dl-llm-strengthening-plan-v1.md)）
+補的是量化的一整份評測集（44 題，涵蓋單工具／跨工具／消歧／查無資料／超出範圍五類），
+跑完會產出工具選擇正確率、數字幻覺率（程式比對答案數字是否出現在工具回傳過的 JSON 裡，
+不用 LLM-as-judge）、拒答正確率、token 與延遲統計，寫成 `docs/verification/agent-eval-*.md`：
+
+```bash
+dotnet test tests/Erp.Infrastructure.Tests \
+  --filter "FullyQualifiedName~AgentEvaluationTests"
+```
+
+計分邏輯本身的正確性由 `AgentEvaluationHarnessTests`（離線、不需金鑰）釘住 ——
+幻覺偵測抓不抓得到編出來的數字、工具選錯時正確率會不會掉，兩邊都反向驗證過。
+`AgentEvaluationTests` 裡還有一條反向驗證：把某個工具的說明改成誤導文字重跑，
+工具選擇正確率必須看得出下降，不然這組測試量不到「工具描述品質」這件事。
+
+**這個 repo 目前沒有 Anthropic 金鑰跑過這組測試**，`docs/verification/` 底下還沒有
+`agent-eval-*.md`——跟 `AnthropicLiveApiTests` 欠的是同一筆帳，見下面「已知限制」。
 
 ### 十二個工具
 
@@ -809,13 +828,13 @@ EF Core 的 SQLite provider 會註冊 `ef_compare()`、`ef_sum()` 與 `EF_DECIMA
 
 ## 測試策略
 
-405 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
-跑起來共 435 個；接真實 Anthropic API 的 3 個測試沒金鑰時 skip：
+413 個測試，分四個專案。檢索品質那組只在本機有 Ollama 時執行，
+跑起來共 443 個；接真實 Anthropic API 的 5 個測試沒金鑰時 skip：
 
 | 專案 | 數量 | 涵蓋 |
 |---|---|---|
 | `Erp.Application.Tests` | 96 | 計算邏輯（多階 BOM、風險判定、MRP、ML 特徵計算），用 in-memory 假 Repository |
-| `Erp.Infrastructure.Tests` | 261（+30 需 Ollama，+3 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺；另有接真實模型的檢索品質測試 |
+| `Erp.Infrastructure.Tests` | 269（+30 需 Ollama，+5 需 Anthropic 金鑰） | EF Core 整合、tool-use 迴圈、錯誤契約、稽核 log、Anthropic 與 Ollama wire format、向量運算、切段、檢索與防幻覺、Agent 端到端評測（工具選擇正確率／數字幻覺率／拒答正確率，S4）；另有接真實模型的檢索品質與端到端評測測試 |
 | `Erp.Api.Tests` | 36 | HTTP 端點的錯誤對映與正常路徑、展示環境行為、RAG 不可用時服務照常啟動（`WebApplicationFactory`） |
 | `Erp.ArchitectureTests` | 12 | 分層邊界 |
 
@@ -869,6 +888,14 @@ provider 端是 `scripts/demo-nl-provider.mjs`，跟上面那支的差別只在�
 - **`AnthropicLiveApiTests`** — 唯一接**真實 Anthropic API** 的一組（沒金鑰時整組 skip）。
   假伺服器驗得了「我們送出的 JSON 長什麼樣」，驗不了「真實端點收不收」，這組補的是後者。
   同樣有 `ANTHROPIC_REQUIRE_LIVE` 這個不准 skip 的開關，理由跟 `RAG_REQUIRE_OLLAMA` 一樣。
+- **`AgentEvaluationTests`**（S4） — 也是接**真實 Anthropic API**，跟 `AnthropicLiveApiTests`
+  共用同一把 `AnthropicLiveFactAttribute`。差別在規模：那邊釘 3 個具體情境，
+  這裡跑 `AgentEvaluationSet` 全部 44 題，量出工具選擇正確率、數字幻覺率
+  （程式比對答案數字有沒有出現在這次對話任何工具回傳過的 JSON 裡，不用 LLM-as-judge）、
+  拒答正確率、token 與延遲統計。計分邏輯本身由離線的 `AgentEvaluationHarnessTests` 釘住——
+  幻覺偵測抓不抓得到編出來的數字、工具選錯時正確率會不會掉，都有正反案例對照。
+  另外有一條反向驗證：把某個工具的說明改成跟實際功能無關的誤導文字重跑同一批案例，
+  工具選擇正確率必須看得出下降，不然這組測試形同虛設。
 - **`QueryEfficiencyTests`** — 斷言查詢次數如何「隨缺料料號數成長」，而不是絕對次數
   （那會隨 BOM 結構改變，只會製造脆弱的測試）。把 N+1 改回去會紅。
 - **`VectorMathTests`** — cosine 的邊界案例：零向量回 0 不回 `NaN`、維度不一致擲例外
@@ -1019,6 +1046,11 @@ curl "http://localhost:5199/api/mrp/shortages"
   但 provider 那端是本機 stub，從未打過 `api.anthropic.com`（本機沒有金鑰）。
   接正式端點的測試（`AnthropicLiveApiTests`）已經寫好，設好金鑰跑一次就會產出
   可歸檔的紀錄 —— 見「真實 API 驗證怎麼跑」。
+- **S4 的 Agent 端到端評測（`AgentEvaluationTests`）同樣沒對真的模型跑過**：
+  44 題評測集、計分邏輯（工具選擇正確率／數字幻覺率／拒答正確率）與報表產生
+  都由離線的 `AgentEvaluationHarnessTests` 釘住，但「真模型在這 44 題上實際表現多少」
+  跟上面 `AnthropicLlmClient` 那條是同一筆帳——沒有金鑰就跑不出真實數字，
+  設好金鑰跑一次就會在 `docs/verification/` 產出可歸檔的報表。
 - **走 gateway 時 `tool_result` 的 `is_error` 旗標會被丟掉**：OpenAI 的訊息格式沒有這個欄位，
   OmniRoute 轉譯時只留下 content。這不影響錯誤處理 —— 系統提示詞是依 content 裡的
   `error_code` 決定怎麼做，不是依那個旗標，實測 `ENTITY_NOT_FOUND` 與

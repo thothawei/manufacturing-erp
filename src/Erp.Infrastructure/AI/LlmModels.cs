@@ -29,7 +29,11 @@ public sealed record LlmRequest(
     IReadOnlyList<LlmMessage> Messages,
     IReadOnlyList<ToolDefinition> Tools);
 
-public sealed record LlmResponse(IReadOnlyList<LlmContentBlock> Content)
+/// token 用量，供成本/評測統計使用；不是所有 ILlmClient 實作都填得出來（例如測試替身），
+/// 所以是選填欄位而不是必要建構參數。
+public sealed record LlmUsage(long InputTokens, long OutputTokens);
+
+public sealed record LlmResponse(IReadOnlyList<LlmContentBlock> Content, LlmUsage? Usage = null)
 {
     public IReadOnlyList<LlmToolUseBlock> ToolUses => [.. Content.OfType<LlmToolUseBlock>()];
 

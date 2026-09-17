@@ -92,7 +92,9 @@ public sealed class AnthropicLlmClient : ILlmClient
     {
         var response = await _client.Beta.Messages.Create(BuildParams(request));
 
-        return new LlmResponse([.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()]);
+        return new LlmResponse(
+            [.. response.Content.Select(ToNeutralBlock).OfType<LlmContentBlock>()],
+            new LlmUsage(response.Usage.InputTokens, response.Usage.OutputTokens));
     }
 
     /// refusal fallback 只有 Anthropic 官方端點吃得下，打 gateway 時整組省略。

@@ -87,7 +87,7 @@ JD 明寫的 SFT / 微調完全沒有。這塊做不做得成，決定履歷能�
 | S1 | Cross-encoder reranker 進 RAG | **DL** / NLP / 檢索 | 3-4 天 | 無 |
 | S2 | 客訴文本多標籤分類（微調 BERT） | **DL** / NLP / 特徵工程 | 4-5 天 | 無 |
 | S3 | LoRA SFT：小模型做工具呼叫 | **LLM 微調 / SFT** | 5-7 天 | S4 的評測集先有雛形較好 |
-| S4 | Agent 端到端評測 harness | LLM 評測 / 可靠性 | 3 天 | 無 |
+| ~~S4~~ | ~~Agent 端到端評測 harness~~ | LLM 評測 / 可靠性 | **已完成 2026-09-17** | 無 |
 | S5 | MLflow + 漂移監控 + 模型註冊 | MLOps | 2-3 天 | S1/S2 有模型後做才划算 |
 | S6（選做） | 物料需求時間序列預測 | 時間序列 / DL 對照 | 4-5 天 | 無 |
 
@@ -231,7 +231,68 @@ AI 助理可由設定切換；文件寫清楚適用範圍
 
 ---
 
-## S4：Agent 端到端評測 harness（3 天）
+## S4：Agent 端到端評測 harness —— 已完成（2026-09-17），但跟 S1-S3 一起卡在同一個環境限制
+
+**為什麼是 S4 先做，不是照表訂的 S1**：S1/S2/S3 都要從 huggingface.co（或其鏡像）
+抓預訓練權重（`bge-reranker-v2-m3`、`hfl/chinese-macbert-base`、`Qwen3-4B`），
+而執行這份規劃的雲端 session 的網路政策把 huggingface.co／hf-mirror.com／modelscope.cn
+全部擋在 403（org policy denial，不是暫時性的連線問題，`curl` 對三個網域都拿到
+「gateway 403 to CONNECT」）。S4 不需要下載任何模型，純 C#/測試工程，
+所以先做這個、把 S1-S3 留給有網路權限跑的環境或下一個 session。
+
+**實作結果**：照這一節的方向做，四個要量測的指標全部做了（工具選擇正確率、數字幻覺率、
+拒答正確率、token／成本／延遲），CI 整合方式也照抄 `AnthropicLiveApiTests`
+（同一個 `AnthropicLiveFactAttribute`／`ANTHROPIC_REQUIRE_LIVE` 機制，沒有另外開一個
+常駐的 CI job——`AnthropicLiveApiTests` 本身也沒有，見下面的落地細節）。
+三處跟原規劃不同或補的東西：
+
+- **案例數 44，不是評測數字，是刻意的下限**：原規劃寫 40-60。44 題涵蓋六個維度
+  （單工具 × 12 個工具、跨工具、消歧、查無資料、超出範圍），每個工具至少兩題、
+  跨工具至少六題——再往上加案例邊際價值遞減，44 題已經能撐住四個指標的統計意義，
+  且每題都要真的接一次 Claude、可能還要走多輪工具呼叫，案例數直接等於這組測試的
+  真實成本與跑多久，不是越多越好。
+- **「期望數字」不是寫死在案例集裡，是現場從工具回傳的 JSON 撈出來的**：
+  `AgentEvalCase` 只記錄查詢文字、案例類別、期望被呼叫的工具、要不要拒答，
+  不記錄任何數字。原規劃寫「期望數字由既有 API 直接算出當真值」，
+  照字面做法是另外呼叫一次 Application Service 算出期望值、再跟模型答案比對——
+  但這樣等於維護兩份「正確答案」（案例集裡一份、工具回傳一份），兩者不同步時
+  分不出是模型錯還是案例集過期。改成：**這次對話裡模型自己呼叫工具拿到的 JSON，
+  就是這次的 ground truth**（工具本身就是「既有 API」，且是真的在這通對話裡現場查的，
+  不是預先算好貼上去）。數字幻覈偵測拿答案裡的每個數字去比對「這次對話裡所有工具
+  回傳過的文字」，不在裡面的才算幻覺——比對方式是字面子字串，已知的假陽性/假陰性
+  方向在 `AgentEvaluationHarness.FindHallucinatedNumbers` 的註解裡寫明。
+- **LLM-as-judge 那個維度沒有做**：原規劃寫「回答是否切題」用 judge、
+  抽 20 組人工校準一致率。這份 44 題的案例集裡沒有「有沒有離題」這種沒有標準答案的
+  題目——四個已實作指標（工具選對、數字不編、該拒答時拒答、token/成本/延遲）
+  已經涵蓋所有題目「答得對不對」可以程式化判斷的部分，加一個 judge 維度是為了做而做。
+  之後如果案例集擴充到需要判斷「措辭是否得體」「有沒有主動提供有用的追問建議」這類
+  沒有標準答案的維度，再補這件事，屆時 20 組人工校準一致率一樣不能省。
+
+**反向驗證怎麼做的**（規劃裡明寫的驗收標準）：`AiAssistantService.AskAsync` 內部固定呼叫
+`AssistantScope.ToolsFor(role)`，角色過濾是唯一的注入點，刻意不留後門讓呼叫端夾帶
+自訂工具清單。所以反向驗證測試（`反向驗證_工具描述被改壞後工具選擇正確率會下降`）
+在測試檔裡本地重建了一份陽春版 tool-use 迴圈（不含對話記憶、角色過濾），
+只為了能把 `check_material_sufficiency_for_item` 的說明換成一句誤導文字重跑，
+證明正確率會下降。這是刻意的、僅供這個測試用的重複，不是要取代 `AiAssistantService`。
+
+**離線那一半**：`AgentEvaluationHarnessTests`（8 個測試，不需金鑰）把計分邏輯本身釘住——
+幻覺偵測抓不抓得到編出來的數字、工具選錯時工具選擇正確率會不會變成 0、
+`Aggregate` 的三個比率算得對不對、`EstimateCostUsd` 對已知/未知模型的行為、
+`BuildReport` 產出的報表含不含該有的區塊。這一半是這個 harness 唯一在這個環境裡
+真的跑過、真的綠燈的部分。
+
+**誠實的邊界，跟 Phase 0 是同一筆帳**：這個 session 沒有 Anthropic 金鑰，
+`AgentEvaluationTests`（含完整 44 題評測集、反向驗證）在這裡是 skip 狀態，
+`docs/verification/` 底下還沒有 `agent-eval-*.md`。工具選擇正確率、數字幻覺率、
+拒答正確率、token/成本/延遲——**這些數字目前一個都沒有真的跑出來過**，
+不能講「應該會過」。設好金鑰跑一次 `dotnet test tests/Erp.Infrastructure.Tests
+--filter "FullyQualifiedName~AgentEvaluationTests"` 就會補上。
+
+成本估算用的官方牌價（`AgentEvaluationHarness` 裡的 `Pricing` 表）是 2026-09-17
+讀自 platform.claude.com/docs/en/about-claude/pricing 的即時資料，
+不是訓練資料裡的舊數字；牌價會變，程式碼裡的註解已經標明來源與日期。
+
+**原本的規劃**
 
 現有測試驗的是「工具契約、錯誤路徑、LLM 不可竄改數字」，
 沒有一組**量化**的「這個 agent 答得對不對」。S3 需要這把尺，S4 先把尺造出來。
@@ -295,6 +356,13 @@ GBDT with lag features、小型 DL（N-BEATS 或 1D-CNN）。
 
 ## 下一步
 
-S0 已完成（2026-09-16），下一步是 S1。
+S0、S4 已完成（2026-09-16、2026-09-17）。S1/S2/S3 都卡在同一個環境限制——
+執行這份規劃的雲端 session 連不上 huggingface.co／hf-mirror.com／modelscope.cn
+（org policy 403，見 S4 開頭的說明），沒有預訓練權重就做不下去。
+下一步：換一個網路政策允許連到 HuggingFace（或有現成鏡像可用）的環境接手 S1，
+或者由你決定要不要調整這個 session 的網路權限。S4 的離線那一半
+（`AgentEvaluationHarnessTests`）已經綠燈，但 `AgentEvaluationTests` 那一半
+（真的接 Claude 跑 44 題、量出真實數字）跟 Phase 0 一樣卡在沒有 Anthropic 金鑰——
+兩件事一起補會比較有效率（同一個 `dotnet test`、同一份 `docs/verification/`）。
 每階段結束時：更新本文件對應章節為實作紀錄（比照 v1→v2→v3 的做法）、
 跑完 CI 四步、commit。
