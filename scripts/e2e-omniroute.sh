@@ -93,12 +93,20 @@ PY
   fi
 }
 
-WO="WO-$(date -u +%Y%m%d)-01"
+# 工單號是 seeder 在「資料庫建立當天」產生後就凍結的，不是今天 ——
+# 用 date 組出來的號碼只在 DB 剛建好那天對得上，隔天就查無此單。
+# 直接打 at-risk 取一張實際存在的：那兩張風險工單的途程都有「面板貼合」。
+WO=$(curl -sS -m 10 --noproxy '*' "$ERP_URL/api/work-orders/at-risk" 2>/dev/null \
+  | python3 -c 'import sys,json;r=json.load(sys.stdin);print(r[0]["workOrderNo"] if r else "")' 2>/dev/null)
 
 check "search_items 查到料號"            '@@CALL search_items {"keyword":"面板"}@@'                                   '"item_code":"PANEL-01"'
 check "get_item_inventory_status 可用量"  '@@CALL get_item_inventory_status {"item_code":"PANEL-01"}@@'                '"available_qty":80'
 check "check_material_sufficiency 可製造量" '@@CALL check_material_sufficiency_for_item {"item_code":"TV-100"}@@'      '"max_buildable_qty":40'
-check "get_work_order_progress 途程"      "@@CALL get_work_order_progress {\"work_order_no\":\"$WO\"}@@"               '"operation_name":"面板貼合"'
+if [ -n "$WO" ]; then
+  check "get_work_order_progress 途程"    "@@CALL get_work_order_progress {\"work_order_no\":\"$WO\"}@@"               '"operation_name":"面板貼合"'
+else
+  printf '✗ get_work_order_progress 途程\n    at-risk 取不到工單號，展示資料可能沒灌進去\n'; FAIL=$(( FAIL + 1 ))
+fi
 check "list_work_orders_at_risk 風險原因"  '@@CALL list_work_orders_at_risk {}@@'                                      '"risk_reason"'
 check "run_mrp_shortage_analysis 建議採購" '@@CALL run_mrp_shortage_analysis {}@@'                                     '"suggested_order_qty"'
 check "list_open_purchase_orders 未結採購" '@@CALL list_open_purchase_orders {}@@'                                     '"po_no"'
