@@ -36,7 +36,7 @@ DL 在那裡不是裝飾品。同一條原則套到 LLM：SFT 要做，但要做
 | 第三層 FastAPI + Docker + C# HttpClient | **刻意不做，改用 ONNX** | 推論走 `Microsoft.ML.OnnxRuntime` 進程內載入。少一個要顧的服務、少一次網路往返、clone 下來跑測試不必裝 Python |
 | C# 端整合 | **已完成** | `IDelayRiskModel` port + `OnnxDelayRiskModel`，AI 工具 `predict_work_order_delay_risk`，端點 `/api/work-orders/{no}/delay-risk`，規則式與模型式並陳 |
 | 架構圖文件 | **已完成** | README 專案結構 + 各模組規劃文件 |
-| MLflow 實驗追蹤（草案選做） | **未做** | 見第 3 節 S5 |
+| MLflow 實驗追蹤（草案選做） | **已完成 2026-09-17** | 見第 3 節 S5 |
 | model drift 監控（草案選做） | **未做，且已列為已知限制** | 見第 3 節 S5 |
 | 物料需求量預測（草案兩個題目之一） | **已完成 2026-09-17** | 見第 3 節 S6 |
 
@@ -88,7 +88,7 @@ JD 明寫的 SFT / 微調完全沒有。這塊做不做得成，決定履歷能�
 | S2 | 客訴文本多標籤分類（微調 BERT） | **DL** / NLP / 特徵工程 | 4-5 天 | 無 |
 | S3 | LoRA SFT：小模型做工具呼叫 | **LLM 微調 / SFT** | 5-7 天 | S4 的評測集先有雛形較好 |
 | ~~S4~~ | ~~Agent 端到端評測 harness~~ | LLM 評測 / 可靠性 | **已完成 2026-09-17** | 無 |
-| S5 | MLflow + 漂移監控 + 模型註冊 | MLOps | **模型註冊那一小塊已完成 2026-09-17，其餘 2-3 天** | MLflow／漂移偵測等 S1/S2 有模型後做才划算 |
+| S5 | MLflow + 漂移監控 + 模型註冊 | MLOps | **模型註冊與實驗追蹤已完成 2026-09-17，漂移監控仍未做** | 漂移監控需要先加請求記錄，另一個工程 |
 | ~~S6（選做）~~ | ~~物料需求時間序列預測~~ | 時間序列 / DL 對照 | **已完成 2026-09-17** | 無 |
 
 總計約 4 週（不含 S6）。每個階段可獨立 commit、獨立寫進履歷，中途停在任何一階
@@ -309,34 +309,53 @@ AI 助理可由設定切換；文件寫清楚適用範圍
 
 ---
 
-## S5：MLflow + 漂移監控 + 模型註冊（2-3 天）— 缺口 C
+## S5：MLflow + 漂移監控 + 模型註冊 —— 模型註冊與實驗追蹤已完成（2026-09-17），漂移監控仍未做
 
-**模型註冊那一小塊先做了（2026-09-17）**，理由跟 S4 一樣：不需要下載任何預訓練權重，
-純 C# 工程，跟 S1-S3 被同一個網路限制卡住的處境無關。做的是這一節列出的三件事裡
-最小、但最直接對應「模型檔與程式碼版本對不上時要能當場看出來」那句話的一塊：
+**先做了模型註冊那一小塊（2026-09-17）**，理由跟 S4 一樣：不需要下載任何預訓練權重，
+純 C# 工程，跟 S1-S3 被同一個網路限制卡住的處境無關。
 
 - `OnnxDelayRiskModel` 現在會比對 metadata 宣告的特徵順序跟 `WorkOrderDelayFeatures.FeatureNames`，
   對不上就把 `IsAvailable` 判定為 false（連同 `PredictDelayProbability` 一起拒絕執行），
   不是照跑一個把數值餵進錯欄位、外觀正常但語意錯誤的機率。跟分布外檢查是同一種「不報錯的
   失敗」，處理方式也一樣：停用，而不是照跑。反向驗證：`DelayRiskModelTests` 裡把 metadata
-  的一個特徵名稱換掉，模型會停用；換回來則不會。
+  的一個特徵名稱換掉，模型會停用；換回來則不會。同一道防線也套用到 S6 的
+  `OnnxMaterialDemandForecastModel`。
 - 新增 `/api/ml/model-health` 端點，把 `available`／`featureSchemaConsistent`／`isCalibrated`／
   `decisionThreshold`／`trainedOn`／`dataSource`／`rowsTotal`／`rocAuc` 曝露出來——
   這就是這一節講的「C# 端啟動時把版本號寫進…健康檢查端點」，只是沒有版本號（見下）。
 
+**後來 S6 做完、有了第二組可比較的模型之後，補上了實驗追蹤（2026-09-17）**：
+原本判斷「只有一個模型，沒有第二個實驗可比，等 S1/S2 有模型再接」——但 S6 本身
+就產生了三個要互相對照的訓練結果（seasonal naive／GBDT／MLP），這正是 MLflow 比較視圖
+的典型情境，不需要等到 S1/S2。做的事：
+
+- `ml/train.py` 與 `ml/train_demand_forecast.py` 都接了 MLflow（本機 file store
+  `ml/mlruns/`，不架伺服器，`.gitignore` 排除——重跑訓練腳本會重新產生，不需要進 repo）。
+  記參數（random_state、特徵數、切分方式等）、指標（AUC/MAPE/MAE/RMSE 等，依模型而定）、
+  是否為贏家／是否為部署對象的 tag；部署的模型另外把 ONNX 與 metadata JSON 存成 artifact。
+- `ml/train_demand_forecast.py` 把三個方法各記成同一個 experiment 底下的一個 run，
+  UI 的「比較執行」表格天生就是為了這種情境設計的。截圖（`docs/images/
+  mlflow-demand-forecast-comparison.png`）貼在
+  [`docs/material-demand-forecast-plan-v1.md`](material-demand-forecast-plan-v1.md)。
+- **驗證過重跑訓練腳本不會動到模型本身**：重新訓練後 `work-order-delay-model.json`
+  只有 `trained_on` 日期變了，`material-demand-forecast-model.json` 完全沒變、
+  `.onnx` 只有 onnxmltools 隨機產生的圖形名稱（UUID）不同，golden sample 數字
+  逐位元相同——MLflow 只是多觀測這次訓練，不影響訓練本身的任何計算。
+
 **沒做、而且刻意沒做的**：
 
 - **沒有版本號／訓練資料雜湊**。metadata JSON 目前沒有這兩個欄位，要加就得改
-  `ml/train.py` 重新訓練一次（即使模型權重不變，metadata 格式改了也得重新產生這個檔案，
-  不能手動編輯——那不是「訓練當下量出來的數字」了）。這個環境沒有裝 Python 訓練環境，
-  留給下一次真的動 `ml/train.py`（例如做 S1/S2）時一起補，不單獨為了加兩個欄位跑一次訓練。
-- **MLflow 完全沒碰**：只有一個模型、一次訓練紀錄，跑 MLflow 比較的是「不同實驗之間」的
-  差異，現在沒有第二個實驗可比。等 S1/S2 真的做出新模型再接，跟這一節原本的判斷一致。
+  訓練腳本並重新訓練一次（即使模型權重不變，metadata 格式改了也得重新產生這個檔案，
+  不能手動編輯——那不是「訓練當下量出來的數字」了）。留給下一次真的改動特徵/模型時
+  （例如做 S1/S2）一起補，不單獨為了加兩個欄位跑一次訓練——MLflow 的 run ID 本身
+  已經是一種輕量的版本標記，兩者不是互斥的，只是欄位優先權排在後面。
 - **漂移偵測（PSI）沒做**：需要「近期線上輸入分布」，但這個系統目前沒有任何地方
   記錄推論請求的特徵向量——沒有資料就沒有分布可比。要做的話得先加一層請求記錄，
   那是比 PSI 計算本身更大的工程，這裡不順手夾帶。
 - **重訓觸發設計**：跟 `ml-risk-prediction-module-plan-v1.md` 第 11 節寫的一致，
   標籤延遲讓自動重訓在這個規模是假的，沒有新東西可補。
+
+**原本的規劃**
 
 - **實驗追蹤**：`ml/train.py`（以及 S1/S2 的訓練腳本）接 MLflow，
   記參數、指標、資料版本雜湊、模型檔。本機 file store 即可，不架伺服器。
@@ -420,11 +439,11 @@ GBDT with lag features、小型 DL（N-BEATS 或 1D-CNN）。
 ## 下一步
 
 S0、S4、S6 已完成（2026-09-16、2026-09-17、2026-09-17），
-S5 的模型註冊那一小塊也完成了（2026-09-17）。
+S5 的模型註冊與實驗追蹤兩塊也完成了（2026-09-17，漂移監控仍未做，見該節）。
 S1/S2/S3 都卡在同一個環境限制——
 執行這份規劃的雲端 session 連不上 huggingface.co／hf-mirror.com／modelscope.cn
 （org policy 403，見 S4 開頭的說明），沒有預訓練權重就做不下去，
-這個限制不影響 S6（沒有預訓練權重需求）。
+這個限制不影響 S5/S6（都沒有預訓練權重需求）。
 下一步：換一個網路政策允許連到 HuggingFace（或有現成鏡像可用）的環境接手 S1，
 或者由你決定要不要調整這個 session 的網路權限。S4 的離線那一半
 （`AgentEvaluationHarnessTests`）已經綠燈，但 `AgentEvaluationTests` 那一半

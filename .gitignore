@@ -11,3 +11,7 @@ obj/
 # ML 訓練用的 Python 虛擬環境。只有重新訓練模型時才需要它 ——
 # 推論不需要 Python，模型以 ONNX 格式進 repo。
 ml/.venv/
+
+# MLflow 本機 file store：每次重跑訓練腳本會重新產生，不進 repo
+# （模型檔本身走 ONNX 進 repo，這裡只是訓練當下的實驗記錄）。
+ml/mlruns/

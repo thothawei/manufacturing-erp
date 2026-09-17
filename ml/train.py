@@ -20,6 +20,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import mlflow
 import numpy as np
 import pandas as pd
 from skl2onnx import to_onnx
@@ -37,6 +38,11 @@ from sklearn.preprocessing import StandardScaler
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "ml" / "data" / "work-order-history.csv"
 OUT_DIR = ROOT / "src" / "Erp.Infrastructure" / "Ml"
+
+# 本機 file store，不架伺服器：`ml/.venv/bin/mlflow ui --backend-store-uri ml/mlruns`
+# 在本機看比較表。不進 repo（.gitignore），每次重跑會重新產生。
+MLFLOW_DIR = ROOT / "ml" / "mlruns"
+MLFLOW_EXPERIMENT = "work-order-delay-risk"
 
 # 順序必須與 WorkOrderDelayFeatures.FeatureNames 一致。
 # ONNX 吃的是沒有欄位名稱的張量，順序錯了它會照算不誤，只是算出來毫無意義。
@@ -343,6 +349,36 @@ def main() -> None:
 
     (OUT_DIR / "work-order-delay-model.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    # 實驗追蹤（S5）：記參數、指標、資料版本、模型檔，本機 file store，不架伺服器。
+    # 放在計算完成之後才開始記錄——mlflow 只負責觀測這次訓練，不影響訓練本身的任何行為。
+    mlflow.set_tracking_uri(f"file:{MLFLOW_DIR}")
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    with mlflow.start_run(run_name=f"logistic-regression-{date.today().isoformat()}"):
+        mlflow.log_params({
+            "model_type": "logistic_regression",
+            "random_state": RANDOM_STATE,
+            "target_recall": TARGET_RECALL,
+            "feature_count": len(FEATURES),
+            "rows_total": raw_rows,
+            "data_source_seed": 20260913,
+        })
+        mlflow.log_metrics({
+            "roc_auc": auc,
+            "average_precision": average_precision,
+            "threshold": threshold,
+            "precision_at_threshold": at_threshold["precision"],
+            "recall_at_threshold": at_threshold["recall"],
+            "f1_at_threshold": at_threshold["f1"],
+            "calibration_brier_uncalibrated": calibration["uncalibrated"]["brier"],
+            "calibration_ece_uncalibrated": calibration["uncalibrated"]["ece"],
+        })
+        mlflow.set_tags({
+            "calibration_applied": calibration["applied"] or "none",
+            "data_source": "simulated",
+        })
+        mlflow.log_artifact(str(OUT_DIR / "work-order-delay-model.onnx"))
+        mlflow.log_artifact(str(OUT_DIR / "work-order-delay-model.json"))
 
     print(f"ROC AUC = {auc:.4f}，Average Precision = {average_precision:.4f}")
     print(f"選定閾值 {threshold:.2f}："

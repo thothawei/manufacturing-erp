@@ -36,6 +36,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import mlflow
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
@@ -51,6 +52,10 @@ from sklearn.preprocessing import StandardScaler
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "ml" / "data" / "material-demand-history.csv"
 OUT_DIR = ROOT / "src" / "Erp.Infrastructure" / "Ml"
+
+# 同一個本機 file store，跟 ml/train.py 共用，不同 experiment 名稱分開。
+MLFLOW_DIR = ROOT / "ml" / "mlruns"
+MLFLOW_EXPERIMENT = "material-demand-forecast"
 
 ITEMS = ["PANEL-01", "SCREW-05", "CABLE-07"]
 
@@ -236,6 +241,39 @@ def main() -> None:
 
     (OUT_DIR / "material-demand-forecast-model.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    # 實驗追蹤（S5）：三個方法各開一個 run，同一個 experiment 底下——
+    # MLflow UI 的「比較執行」表格本來就是為了這種情境設計的：同一批資料、
+    # 同一個切分，三個方法的指標並排，這正是這個模組的核心產出。
+    mlflow.set_tracking_uri(f"file:{MLFLOW_DIR}")
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    run_stamp = date.today().isoformat()
+
+    for method in ("seasonal_naive", "gbdt", "mlp"):
+        with mlflow.start_run(run_name=f"{method}-{run_stamp}"):
+            mlflow.log_params({
+                "method": method,
+                "random_state": RANDOM_STATE,
+                "train_end_week": TRAIN_END_WEEK,
+                "rows_train": int(len(train)),
+                "rows_test": int(len(test)),
+                "feature_count": len(FEATURES),
+            })
+            mlflow.log_metrics({
+                "mae": results["overall"][method]["mae"],
+                "rmse": results["overall"][method]["rmse"],
+                "mape": results["overall"][method]["mape"],
+                "mean_mape_by_item": mean_mape[method],
+            })
+            mlflow.set_tags({
+                "is_winner": str(method == winner),
+                "is_deployed": str(method == deployed_model),
+                "data_source": "simulated",
+            })
+
+            if method == deployed_model:
+                mlflow.log_artifact(str(OUT_DIR / "material-demand-forecast-model.onnx"))
+                mlflow.log_artifact(str(OUT_DIR / "material-demand-forecast-model.json"))
 
     print(f"訓練樣本 {len(train)} 筆、測試樣本 {len(test)} 筆")
     print("整體指標（MAE / RMSE / MAPE）：")

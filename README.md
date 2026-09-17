@@ -783,6 +783,15 @@ lag 特徵，硬掛上去只會是一個問不出來也答不出來的工具。
 **DL 用 `MLPRegressor` 不是 N-BEATS/1D-CNN**：這個 repo 的訓練工具鏈只有
 scikit-learn，沒有 PyTorch。取捨與理由見上面連結的文件第 6 節。
 
+**三方對照現在接了 MLflow**（S5，本機 file store，不架伺服器）——三個方法各是
+同一個 experiment 底下的一個 run，UI 的「比較執行」表格正好是為這種情境設計的：
+
+![MLflow 三方對照](docs/images/mlflow-demand-forecast-comparison.png)
+
+```bash
+ml/.venv/bin/mlflow ui --backend-store-uri ml/mlruns
+```
+
 ## API 錯誤處理
 
 `ErpExceptionHandler` 把 Application 層的例外對映成語意正確的狀態碼。

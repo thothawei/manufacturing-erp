@@ -148,6 +148,21 @@ CABLE-07 最高（波動最大的品項，符合預期——振幅最大的序�
 metadata 裡的 `deployment_note` 會誠實記錄兩者是否一致（萬一之後重訓换了贏家，
 這個欄位會如實反映「部署的不是贏家」而不是悄悄配合著改）。
 
+### 實驗追蹤（MLflow）
+
+`ml/train_demand_forecast.py` 把三個方法各記成同一個 experiment（`material-demand-forecast`）
+底下的一個 run——這正是這個模組最初判斷「MLflow 要等有多個實驗可比才划算」的那個情境，
+三方對照天生就是三個 run。本機 file store（`ml/mlruns/`，不進 repo），本機看比較表：
+
+```bash
+ml/.venv/bin/mlflow ui --backend-store-uri ml/mlruns
+```
+
+![MLflow 三方對照](images/mlflow-demand-forecast-comparison.png)
+
+`is_winner`／`is_deployed` 兩個 tag 讓「贏家是誰」與「部署的是誰」在 UI 上一眼看到，
+不用另外回頭查 JSON——這次兩者剛好都是 GBDT。
+
 ## 9. 落地整合
 
 新增 `IMaterialDemandForecastModel` port（`Erp.Application.Ml`）與

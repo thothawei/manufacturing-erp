@@ -12,3 +12,7 @@ onnxruntime==1.19.2
 lightgbm==4.5.0
 onnx==1.22.0
 onnxmltools==1.16.0
+
+# 實驗追蹤（S5）。本機 file store（ml/mlruns/，已加進 .gitignore），不架伺服器：
+# `ml/.venv/bin/mlflow ui --backend-store-uri ml/mlruns` 在本機看比較表。
+mlflow==2.19.0

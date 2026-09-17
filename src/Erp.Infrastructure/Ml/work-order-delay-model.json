@@ -1,5 +1,5 @@
 {
-  "trained_on": "2026-09-16",
+  "trained_on": "2026-09-17",
   "data_source": "模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
   "rows_total": 1200,
   "rows_train": 900,
