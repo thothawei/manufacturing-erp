@@ -52,9 +52,13 @@ public sealed class OnnxMaterialDemandForecastModel : IMaterialDemandForecastMod
     private readonly string _inputName = "features";
     private readonly bool _schemaMismatch;
 
-    public OnnxMaterialDemandForecastModel(ILogger<OnnxMaterialDemandForecastModel> logger)
+    /// modelDirectory 只給測試用，理由跟 OnnxDelayRiskModel 的同名參數一致：
+    /// 避免測試動到 AppContext.BaseDirectory 底下那份會被同組件其他測試類別
+    /// 平行讀取的共用檔案。
+    public OnnxMaterialDemandForecastModel(
+        ILogger<OnnxMaterialDemandForecastModel> logger, string? modelDirectory = null)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
+        var directory = modelDirectory ?? Path.Combine(AppContext.BaseDirectory, "Ml");
         var modelPath = Path.Combine(directory, ModelFileName);
         var metadataPath = Path.Combine(directory, MetadataFileName);
 

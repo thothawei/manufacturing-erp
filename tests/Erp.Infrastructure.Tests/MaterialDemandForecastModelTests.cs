@@ -10,8 +10,10 @@ namespace Erp.Infrastructure.Tests;
 /// 模型檔真的載得起來、推論真的跑得動，而且算出來的數字與訓練當下一致。
 public class MaterialDemandForecastModelTests
 {
-    private static OnnxMaterialDemandForecastModel CreateModel()
-        => new(NullLogger<OnnxMaterialDemandForecastModel>.Instance);
+    private static readonly string SharedModelDirectory = Path.Combine(AppContext.BaseDirectory, "Ml");
+
+    private static OnnxMaterialDemandForecastModel CreateModel(string? directory = null)
+        => new(NullLogger<OnnxMaterialDemandForecastModel>.Instance, directory);
 
     [Fact]
     public void Repo裡的模型檔載得起來()
@@ -72,52 +74,35 @@ public class MaterialDemandForecastModelTests
     [Fact]
     public void 特徵順序與metadata不一致時_模型會停用而不是照跑()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
-        var metadataPath = Path.Combine(directory, "material-demand-forecast-model.json");
-        var backup = metadataPath + ".bak";
+        // 獨立臨時目錄，理由見 TempModelDirectory 的說明——不動同組件其他測試類別
+        // 可能同時在平行讀取的共用檔案。
+        using var temp = new TempModelDirectory(SharedModelDirectory, "material-demand-forecast-model");
 
-        File.Copy(metadataPath, backup, overwrite: true);
-        try
-        {
-            var mutated = File.ReadAllText(metadataPath).Replace("\"lag_1\"", "\"totally_different_feature\"");
-            Assert.NotEqual(File.ReadAllText(metadataPath), mutated);
-            File.WriteAllText(metadataPath, mutated);
+        var mutated = File.ReadAllText(temp.MetadataPath).Replace("\"lag_1\"", "\"totally_different_feature\"");
+        Assert.NotEqual(File.ReadAllText(temp.MetadataPath), mutated);
+        File.WriteAllText(temp.MetadataPath, mutated);
 
-            using var model = CreateModel();
+        using var model = CreateModel(temp.Directory);
 
-            Assert.False(model.IsAvailable, "特徵定義對不上時模型仍然回報可用");
-            Assert.False(model.FeatureSchemaConsistent);
-            Assert.Contains("不一致", model.Description);
-            Assert.Throws<MaterialDemandForecastModelUnavailableException>(
-                () => model.PredictDemand(ToFeatures([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0])));
-        }
-        finally
-        {
-            File.Copy(backup, metadataPath, overwrite: true);
-            File.Delete(backup);
-        }
+        Assert.False(model.IsAvailable, "特徵定義對不上時模型仍然回報可用");
+        Assert.False(model.FeatureSchemaConsistent);
+        Assert.Contains("不一致", model.Description);
+        Assert.Throws<MaterialDemandForecastModelUnavailableException>(
+            () => model.PredictDemand(ToFeatures([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0])));
     }
 
     [Fact]
     public void 模型檔不存在時不擲例外_而是回報不可用()
     {
-        var original = Path.Combine(AppContext.BaseDirectory, "Ml", "material-demand-forecast-model.onnx");
-        var backup = original + ".bak";
+        using var temp = new TempModelDirectory(
+            SharedModelDirectory, "material-demand-forecast-model", copyOnnx: false);
 
-        File.Move(original, backup);
-        try
-        {
-            using var model = CreateModel();
+        using var model = CreateModel(temp.Directory);
 
-            Assert.False(model.IsAvailable);
-            Assert.Contains("沒有模型檔", model.Description);
-            Assert.Throws<MaterialDemandForecastModelUnavailableException>(
-                () => model.PredictDemand(ToFeatures([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0])));
-        }
-        finally
-        {
-            File.Move(backup, original);
-        }
+        Assert.False(model.IsAvailable);
+        Assert.Contains("沒有模型檔", model.Description);
+        Assert.Throws<MaterialDemandForecastModelUnavailableException>(
+            () => model.PredictDemand(ToFeatures([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0])));
     }
 
     [Fact]

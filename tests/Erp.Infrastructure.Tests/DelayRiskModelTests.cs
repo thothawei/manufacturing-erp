@@ -11,8 +11,10 @@ namespace Erp.Infrastructure.Tests;
 /// 整段 ONNX 路徑會完全沒被測到，而那正是最容易無聲出錯的地方。
 public class DelayRiskModelTests
 {
-    private static OnnxDelayRiskModel CreateModel()
-        => new(NullLogger<OnnxDelayRiskModel>.Instance);
+    private static readonly string SharedModelDirectory = Path.Combine(AppContext.BaseDirectory, "Ml");
+
+    private static OnnxDelayRiskModel CreateModel(string? directory = null)
+        => new(NullLogger<OnnxDelayRiskModel>.Instance, directory);
 
     [Fact]
     public void Repo裡的模型檔載得起來()
@@ -120,54 +122,39 @@ public class DelayRiskModelTests
     [Fact]
     public void 特徵順序與metadata不一致時_模型會停用而不是照跑()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
-        var metadataPath = Path.Combine(directory, "work-order-delay-model.json");
-        var backup = metadataPath + ".bak";
+        // 在獨立的臨時目錄裡操作，不動 AppContext.BaseDirectory 底下那份共用檔案 ——
+        // 那份檔案在 xUnit 預設的平行測試下，同組件其他測試類別（凡是會建立真的
+        // OnnxDelayRiskModel 的，例如 AiAssistantScenarioTests）隨時可能同時在讀，
+        // 動它會是一個間歇性、跟被測程式碼無關的假紅燈。
+        using var temp = new TempModelDirectory(SharedModelDirectory, "work-order-delay-model");
 
-        File.Copy(metadataPath, backup, overwrite: true);
-        try
-        {
-            var mutated = File.ReadAllText(metadataPath)
-                .Replace("\"material_readiness\"", "\"totally_different_feature\"");
-            Assert.NotEqual(File.ReadAllText(metadataPath), mutated); // 確認真的換到了，不是誤判字串沒命中
-            File.WriteAllText(metadataPath, mutated);
+        var mutated = File.ReadAllText(temp.MetadataPath)
+            .Replace("\"material_readiness\"", "\"totally_different_feature\"");
+        Assert.NotEqual(File.ReadAllText(temp.MetadataPath), mutated); // 確認真的換到了，不是誤判字串沒命中
+        File.WriteAllText(temp.MetadataPath, mutated);
 
-            using var model = CreateModel();
+        using var model = CreateModel(temp.Directory);
 
-            Assert.False(model.IsAvailable, "特徵定義對不上時模型仍然回報可用");
-            Assert.Contains("不一致", model.Description);
-            Assert.Throws<DelayRiskModelUnavailableException>(
-                () => model.PredictDelayProbability(new WorkOrderDelayFeatures(1, 1, 1, 1, 1, 1, 1)));
-        }
-        finally
-        {
-            File.Copy(backup, metadataPath, overwrite: true);
-            File.Delete(backup);
-        }
+        Assert.False(model.IsAvailable, "特徵定義對不上時模型仍然回報可用");
+        Assert.Contains("不一致", model.Description);
+        Assert.Throws<DelayRiskModelUnavailableException>(
+            () => model.PredictDelayProbability(new WorkOrderDelayFeatures(1, 1, 1, 1, 1, 1, 1)));
     }
 
     [Fact]
     public void 模型檔不存在時不擲例外_而是回報不可用()
     {
         // 可選模組：模型沒放進來時整個服務仍要正常啟動，
-        // 而且不能回一個看起來像機率的預設值 —— 那是最糟的失敗方式
-        var original = Path.Combine(AppContext.BaseDirectory, "Ml", "work-order-delay-model.onnx");
-        var backup = original + ".bak";
+        // 而且不能回一個看起來像機率的預設值 —— 那是最糟的失敗方式。
+        // 空的臨時目錄就代表「模型檔沒放進來」，不需要動共用檔案（理由同上）。
+        using var temp = new TempModelDirectory(SharedModelDirectory, "work-order-delay-model", copyOnnx: false);
 
-        File.Move(original, backup);
-        try
-        {
-            using var model = CreateModel();
+        using var model = CreateModel(temp.Directory);
 
-            Assert.False(model.IsAvailable);
-            Assert.Contains("沒有模型檔", model.Description);
-            Assert.Throws<DelayRiskModelUnavailableException>(
-                () => model.PredictDelayProbability(new WorkOrderDelayFeatures(1, 1, 1, 1, 1, 1, 1)));
-        }
-        finally
-        {
-            File.Move(backup, original);
-        }
+        Assert.False(model.IsAvailable);
+        Assert.Contains("沒有模型檔", model.Description);
+        Assert.Throws<DelayRiskModelUnavailableException>(
+            () => model.PredictDelayProbability(new WorkOrderDelayFeatures(1, 1, 1, 1, 1, 1, 1)));
     }
 
     [Fact]

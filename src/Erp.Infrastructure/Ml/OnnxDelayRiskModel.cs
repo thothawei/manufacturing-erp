@@ -79,9 +79,14 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
     /// 這裡是多一層執行期防線，防的是「metadata 手動改過、但沒人重跑過測試」這種情況。
     private readonly bool _schemaMismatch;
 
-    public OnnxDelayRiskModel(ILogger<OnnxDelayRiskModel> logger)
+    /// modelDirectory 只給測試用：指向一個臨時目錄，讓「模型檔不存在」「metadata 跟
+    /// 程式碼對不上」這類測試不用動到 AppContext.BaseDirectory 底下那份共用檔案 ——
+    /// 那份檔案在 xUnit 預設的平行測試下，同一個組件裡其他測試類別（凡是會建立
+    /// 真的 OnnxDelayRiskModel 的）隨時可能讀到，動它會是一個間歇性、跟被測程式碼
+    /// 無關的假紅燈。
+    public OnnxDelayRiskModel(ILogger<OnnxDelayRiskModel> logger, string? modelDirectory = null)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "Ml");
+        var directory = modelDirectory ?? Path.Combine(AppContext.BaseDirectory, "Ml");
         var modelPath = Path.Combine(directory, ModelFileName);
         var metadataPath = Path.Combine(directory, MetadataFileName);
 
