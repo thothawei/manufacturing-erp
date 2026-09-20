@@ -5,3 +5,10 @@ pandas==2.3.3
 scikit-learn==1.6.1
 skl2onnx==1.20.0
 onnxruntime==1.19.2
+
+# 只有重跑 rerank 評估（ml/rerank_eval.py）需要。這是離線量測用的一次性依賴，
+# 不進 .NET 的任何組建或執行路徑，也還沒有任何 S1 的 .NET 整合決定要不要裝。
+# torch 裝 CPU 版即可：
+#   ml/.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch==2.8.0
+sentence-transformers==5.1.2

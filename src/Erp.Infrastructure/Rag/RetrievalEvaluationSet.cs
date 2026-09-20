@@ -1,4 +1,4 @@
-namespace Erp.Infrastructure.Tests;
+namespace Erp.Infrastructure.Rag;
 
 /// 標註的查詢類別。斷言強度按類別分開 —— 用同一條標準去要求
 /// 「同義詞改寫」與「跨文件混合主題」，只會逼人把標準調到最鬆的那個。
