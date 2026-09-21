@@ -35,6 +35,9 @@ RAG 那一側已對真實 Ollama（`bge-m3`）實跑驗證過 —— 而且那�
 
 ### 想自己點點看
 
+**線上試用**：<https://erp-demo-f3j5.onrender.com/>（[Scalar 互動文件](https://erp-demo-f3j5.onrender.com/scalar/v1)）。
+免費方案閒置後會休眠，第一次打開要等 40–60 秒冷啟動。
+
 一份 `Dockerfile` 就能把展示站跑起來（Render / Fly.io 的設定檔在
 [`deploy/`](deploy/)，含逐步說明）：
 
@@ -139,7 +142,7 @@ dotnet run --project src/Erp.Api --urls http://localhost:5199
 | Phase 6 — 把已知限制逐條收掉 | 完成（對話記憶、風險視窗、MRP 重複計算、時間分期、檢索評測集、角色隔離） |
 | Phase 7 — 工單延遲風險預測（ML） | 完成（[`docs/ml-risk-prediction-module-plan-v1.md`](docs/ml-risk-prediction-module-plan-v1.md)），訓練資料是模擬的 |
 | Phase 8 — Agent 能力擴充 | 完成（prompt injection 對抗測試、可寫入工具 + 人工確認流程） |
-| Phase 9 — 展示與部署 | 完成（展示影片、一頁式摘要、容器化與 Render／Fly.io 設定）；公開網址待部署 |
+| Phase 9 — 展示與部署 | 完成（展示影片、一頁式摘要、容器化、Render／Fly.io 設定、公開網址已部署：<https://erp-demo-f3j5.onrender.com/>） |
 
 ### 十個 Application 服務（AI 工具背後真正做事的地方）
 
