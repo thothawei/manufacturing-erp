@@ -1,0 +1,443 @@
+diff --git a/.gitignore b/.gitignore
+index 70ac6ca..3a51b30 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -11,3 +11,7 @@ obj/
+ # ML 訓練用的 Python 虛擬環境。只有重新訓練模型時才需要它 ——
+ # 推論不需要 Python，模型以 ONNX 格式進 repo。
+ ml/.venv/
++
++# MLflow 本機 file store：每次執行 ml/train.py 的實驗記錄，是本機開發歷程，
++# 不是給下一個 clone 的人看的產物（模型檔本身另外以 ONNX 進 repo）。
++ml/mlruns/
+diff --git a/docs/images/mlflow-compare-runs.png b/docs/images/mlflow-compare-runs.png
+new file mode 100644
+index 0000000..739c69b
+Binary files /dev/null and b/docs/images/mlflow-compare-runs.png differ
+diff --git a/docs/images/mlflow-runs-list.png b/docs/images/mlflow-runs-list.png
+new file mode 100644
+index 0000000..fae4648
+Binary files /dev/null and b/docs/images/mlflow-runs-list.png differ
+diff --git a/ml/requirements.txt b/ml/requirements.txt
+index 95ab8a7..df706b5 100644
+--- a/ml/requirements.txt
++++ b/ml/requirements.txt
+@@ -5,3 +5,7 @@ pandas==2.3.3
+ scikit-learn==1.6.1
+ skl2onnx==1.20.0
+ onnxruntime==1.19.2
++
++# 以下只有「實驗追蹤」需要（S5）：本機 MLflow file store（ml/mlruns/），
++# 不架 tracking server，不是訓練或推論的必要依賴。
++mlflow==2.19.0
+diff --git a/ml/train.py b/ml/train.py
+index bab97ee..4c68078 100644
+--- a/ml/train.py
++++ b/ml/train.py
+@@ -10,16 +10,20 @@
+ 輸出：
+     src/Erp.Infrastructure/Ml/work-order-delay-model.onnx
+     src/Erp.Infrastructure/Ml/work-order-delay-model.json（訓練當下的評估數據）
++    ml/mlruns/（MLflow 本機 file store，不進 repo；查看：
++        ml/.venv/bin/mlflow ui --backend-store-uri file://<絕對路徑>/ml/mlruns）
+ 
+ **資料是模擬的。** 生成規則是我自己寫的（見 HistoricalWorkOrderGenerator），
+ 所以模型學得回那條規則幾乎是必然的 —— 那證明的是 pipeline 接起來了，
+ 不是這個模型對真實產線有效。這件事寫在文件最前面，不藏在附註裡。
+ """
+ 
++import hashlib
+ import json
+ from datetime import date
+ from pathlib import Path
+ 
++import mlflow
+ import numpy as np
+ import pandas as pd
+ from skl2onnx import to_onnx
+@@ -38,6 +42,12 @@ ROOT = Path(__file__).resolve().parent.parent
+ DATA = ROOT / "ml" / "data" / "work-order-history.csv"
+ OUT_DIR = ROOT / "src" / "Erp.Infrastructure" / "Ml"
+ 
++# 本機 file store，不架 MLflow tracking server —— 這個專案只有一個人在跑訓練，
++# 伺服器版換來的是多一個要維護的常駐服務，換不到任何東西。
++# mlruns/ 不進 repo：run 記錄是本機實驗歷程，不是給下一個 clone 的人看的產物。
++MLFLOW_TRACKING_DIR = ROOT / "ml" / "mlruns"
++MLFLOW_EXPERIMENT_NAME = "work-order-delay-risk"
++
+ # 順序必須與 WorkOrderDelayFeatures.FeatureNames 一致。
+ # ONNX 吃的是沒有欄位名稱的張量，順序錯了它會照算不誤，只是算出來毫無意義。
+ FEATURES = [
+@@ -234,11 +244,33 @@ def distribution_bounds(x_train) -> dict:
+     }
+ 
+ 
++def sha256_hex(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
+ def main() -> None:
+     if not DATA.exists():
+         raise SystemExit(
+             f"找不到 {DATA}。先執行：dotnet run --project tools/Erp.MlDataGen")
+ 
++    # 資料雜湊算在清理之前的原始檔案內容上：這是「這次重訓跟上次是不是同一份資料」
++    # 的唯一真相。清理後的內容取決於這支腳本自己的邏輯，用它當雜湊來源等於自己證明自己。
++    data_sha256 = sha256_hex(DATA.read_bytes())
++
++    # MLflow：只做實驗追蹤，不架伺服器。tracking URI 指到本機資料夾，
++    # 每次執行都是一個獨立 run，可以在 UI（mlflow ui --backend-store-uri ml/mlruns）
++    # 裡把不同次訓練（例如改過 TARGET_RECALL 又改回來）的參數與指標並排比較。
++    mlflow.set_tracking_uri(MLFLOW_TRACKING_DIR.as_uri())
++    mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
++    mlflow.start_run()
++    mlflow.log_param("random_state", RANDOM_STATE)
++    mlflow.log_param("target_recall", TARGET_RECALL)
++    mlflow.log_param("test_size", 0.25)
++    mlflow.log_param("calibration_bootstrap", CALIBRATION_BOOTSTRAP)
++    # 訓練資料的內容雜湊，而不是檔名或列數：同一份資料重跑要能從這個值看出
++    # 「這次跟上次是不是同一批資料」，列數相同不代表內容相同。
++    mlflow.log_param("data_sha256", data_sha256)
++
+     df = pd.read_csv(DATA)
+     raw_rows = len(df)
+ 
+@@ -278,6 +310,16 @@ def main() -> None:
+     # 這一段不改變模型，只回答「要不要改」——結論可能是「不要」，那也是結論。
+     calibration = evaluate_calibration(model, x_train, y_train, x_test, y_test, probabilities)
+ 
++    mlflow.log_metric("roc_auc", auc)
++    mlflow.log_metric("average_precision", average_precision)
++    mlflow.log_metric("threshold", threshold)
++    mlflow.log_metric("precision_at_threshold", at_threshold["precision"])
++    mlflow.log_metric("recall_at_threshold", at_threshold["recall"])
++    mlflow.log_metric("f1_at_threshold", at_threshold["f1"])
++    mlflow.log_metric("brier_uncalibrated", calibration["uncalibrated"]["brier"])
++    mlflow.log_metric("ece_uncalibrated", calibration["uncalibrated"]["ece"])
++    mlflow.log_param("calibration_applied", calibration["applied"] or "none")
++
+     OUT_DIR.mkdir(parents=True, exist_ok=True)
+ 
+     onnx_model = to_onnx(
+@@ -288,7 +330,19 @@ def main() -> None:
+         options={id(model.steps[-1][1]): {"zipmap": False}},
+         target_opset=17,
+     )
+-    (OUT_DIR / "work-order-delay-model.onnx").write_bytes(onnx_model.SerializeToString())
++    onnx_bytes = onnx_model.SerializeToString()
++    (OUT_DIR / "work-order-delay-model.onnx").write_bytes(onnx_bytes)
++
++    # 模型檔本身的雜湊，不是資料或程式碼的雜湊 —— 這是「metadata 與 .onnx 是不是同一次
++    # 訓練產出的一對」的唯一真相。兩個檔案分開部署（例如只更新了其中一個）時，
++    # C# 端重新計算這個雜湊、與 metadata 記的值一比對就抓得到，不必去比對日期或版本字串
++    # ——那些人會忘記改，位元雜湊不會。
++    model_file_sha256 = sha256_hex(onnx_bytes)
++
++    # 版本號＝訓練日期 + 資料雜湊前 8 碼，刻意不用人工遞增的整數：
++    # 遞增號要有人記得手動加一，這個號碼由「今天訓練的、用哪份資料訓練的」自動決定，
++    # 同一天用同一份資料重訓兩次會得到同一個版本號 —— 這正是我們要的（見下方可重現性驗證）。
++    model_version = f"{date.today().isoformat()}-{data_sha256[:8]}"
+ 
+     coefficients = model.named_steps["classifier"].coef_[0]
+ 
+@@ -311,6 +365,9 @@ def main() -> None:
+ 
+     metadata = {
+         "trained_on": date.today().isoformat(),
++        "model_version": model_version,
++        "data_sha256": data_sha256,
++        "model_file_sha256": model_file_sha256,
+         "data_source": "模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
+         "rows_total": raw_rows,
+         "rows_train": int(len(x_train)),
+@@ -344,6 +401,13 @@ def main() -> None:
+     (OUT_DIR / "work-order-delay-model.json").write_text(
+         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+ 
++    mlflow.log_param("model_version", model_version)
++    mlflow.log_artifact(str(OUT_DIR / "work-order-delay-model.onnx"))
++    mlflow.log_artifact(str(OUT_DIR / "work-order-delay-model.json"))
++    mlflow.end_run()
++    print(f"MLflow run 已記錄（model_version={model_version}），"
++          f"UI 查看：ml/.venv/bin/mlflow ui --backend-store-uri {MLFLOW_TRACKING_DIR.as_uri()}")
++
+     print(f"ROC AUC = {auc:.4f}，Average Precision = {average_precision:.4f}")
+     print(f"選定閾值 {threshold:.2f}："
+           f"precision {at_threshold['precision']:.4f}、recall {at_threshold['recall']:.4f}")
+diff --git a/src/Erp.Application/Ml/IDelayRiskModel.cs b/src/Erp.Application/Ml/IDelayRiskModel.cs
+index b07586b..c9e81c8 100644
+--- a/src/Erp.Application/Ml/IDelayRiskModel.cs
++++ b/src/Erp.Application/Ml/IDelayRiskModel.cs
+@@ -41,6 +41,20 @@ public interface IDelayRiskModel
+     /// 所以由模型自己講出來，而不是寫死在回答文字裡。
+     bool IsCalibrated { get; }
+ 
++    /// 模型版本：訓練日期 + 訓練資料雜湊前 8 碼（見 metadata 的 model_version）。
++    /// 沒有 metadata 時是 null。
++    string? ModelVersion { get; }
++
++    /// 模型檔（.onnx）與 metadata（.json）是不是同一次訓練產出的一對。
++    ///
++    /// 兩個檔案各自進 repo、各自部署，只更新其中一個是最常見的部署事故 ——
++    /// 版本字串、訓練日期這種人工填寫的欄位會忘記改，但檔案本身的位元不會說謊。
++    /// 這裡比對的是 metadata 記錄的 model_file_sha256 與實際載入的 .onnx 內容雜湊；
++    /// 兩者不一致代表這對檔案不是同一次 `ml/train.py` 執行的產出。
++    /// 沒有 metadata、或 metadata 裡沒有這個欄位（舊格式）時視為「無法驗證」，回傳 false
++    /// 並在 Description 裡說明——不能驗證就不能宣稱一致。
++    bool ArtifactVersionConsistent { get; }
++
+     /// 預測「這張工單會延遲」的機率（0~1）
+     double PredictDelayProbability(WorkOrderDelayFeatures features);
+ 
+diff --git a/src/Erp.Application/Ml/IInferenceInputRecorder.cs b/src/Erp.Application/Ml/IInferenceInputRecorder.cs
+new file mode 100644
+index 0000000..12a4e7f
+--- /dev/null
++++ b/src/Erp.Application/Ml/IInferenceInputRecorder.cs
+@@ -0,0 +1,27 @@
++namespace Erp.Application.Ml;
++
++/// 記錄線上推論時實際送進模型的特徵向量，給離線的漂移偵測腳本（PSI）當「近期分布」的來源。
++///
++/// **這是刻意取捨過的簡化版，不是完整的線上資料回流管線**：
++///
++/// 1. **只記憶體，不落地**：重啟就清空。理由是這個作品集規模的系統沒有正式的
++///    可觀測性基礎設施（沒有 ELK、沒有時序資料庫），加一個真正的落地機制
++///    （寫檔案或寫資料表）換到的可靠度，配不上它多出來的維運負擔 ——
++///    而且寫資料表屬於「未取得使用者同意不能做」的資料庫異動。
++/// 2. **固定容量的環狀緩衝區**：新資料進來時覆蓋最舊的一筆，不會無限長大，
++///    也不需要背景清理工作。容量的取捨見 <see cref="BoundedInferenceInputRecorder"/>。
++/// 3. **不拖慢推論**：Record 只做陣列賦值＋一個 lock，是 O(1) 操作。
++///
++/// 這個機制記的是「最近幾百筆」，不是「完整的線上分布」——樣本數不夠大時，
++/// PSI 的統計意義本身就有限，這是 PSI 演算法自己的侷限，不是這裡的侷限。
++public interface IInferenceInputRecorder
++{
++    /// 目前的環狀緩衝區容量
++    int Capacity { get; }
++
++    /// 記錄一次推論的輸入特徵
++    void Record(WorkOrderDelayFeatures features);
++
++    /// 目前緩衝區裡的所有輸入，由舊到新
++    IReadOnlyList<WorkOrderDelayFeatures> Snapshot();
++}
+diff --git a/src/Erp.Application/Ml/WorkOrderDelayRiskPredictionService.cs b/src/Erp.Application/Ml/WorkOrderDelayRiskPredictionService.cs
+index a458439..01b756d 100644
+--- a/src/Erp.Application/Ml/WorkOrderDelayRiskPredictionService.cs
++++ b/src/Erp.Application/Ml/WorkOrderDelayRiskPredictionService.cs
+@@ -42,6 +42,7 @@ public sealed class WorkOrderDelayRiskPredictionService(
+     BomExplosionService bomExplosionService,
+     WorkOrderRiskService workOrderRiskService,
+     IDelayRiskModel model,
++    IInferenceInputRecorder inferenceInputRecorder,
+     IClock clock)
+ {
+     /// 產線一週的基準工單數。除以它是為了讓「負載」變成一個沒有單位的比值，
+@@ -77,6 +78,10 @@ public sealed class WorkOrderDelayRiskPredictionService(
+             probability = model.PredictDelayProbability(features);
+             exceeds = probability >= model.DecisionThreshold;
+             outOfDistribution = model.FindOutOfDistributionFeatures(features);
++
++            // 記錄實際送進模型的輸入，給離線的 PSI 漂移偵測腳本當「近期線上分布」的來源。
++            // 只在真的呼叫了模型時記錄 —— 沒有特徵或模型不可用的情況記了也沒有意義。
++            inferenceInputRecorder.Record(features);
+         }
+ 
+         return new WorkOrderDelayRiskComparison(
+diff --git a/src/Erp.Infrastructure/Ml/BoundedInferenceInputRecorder.cs b/src/Erp.Infrastructure/Ml/BoundedInferenceInputRecorder.cs
+new file mode 100644
+index 0000000..fda073e
+--- /dev/null
++++ b/src/Erp.Infrastructure/Ml/BoundedInferenceInputRecorder.cs
+@@ -0,0 +1,65 @@
++using Erp.Application.Ml;
++
++namespace Erp.Infrastructure.Ml;
++
++/// <see cref="IInferenceInputRecorder"/> 的環狀緩衝區實作。
++///
++/// 容量 500：一個工單延遲風險查詢對應一次 Record，展示站的流量不可能
++/// 短時間衝到這個量，500 筆已經足夠讓離線 PSI 腳本算出一個不算太窄的樣本，
++/// 記憶體佔用（500 × 7 個 double，約 28KB）小到可以忽略。
++/// 這是刻意選的圓整數字，不是量測出來的最佳值 —— 真正有線上流量之後應該回頭調整。
++public sealed class BoundedInferenceInputRecorder : IInferenceInputRecorder
++{
++    private const int DefaultCapacity = 500;
++
++    private readonly WorkOrderDelayFeatures?[] _buffer;
++    private readonly Lock _lock = new();
++    private int _nextIndex;
++    private int _count;
++
++    public BoundedInferenceInputRecorder(int capacity = DefaultCapacity)
++    {
++        if (capacity <= 0)
++        {
++            throw new ArgumentOutOfRangeException(nameof(capacity), "容量必須是正整數");
++        }
++
++        Capacity = capacity;
++        _buffer = new WorkOrderDelayFeatures?[capacity];
++    }
++
++    public int Capacity { get; }
++
++    public void Record(WorkOrderDelayFeatures features)
++    {
++        lock (_lock)
++        {
++            _buffer[_nextIndex] = features;
++            _nextIndex = (_nextIndex + 1) % Capacity;
++            _count = Math.Min(_count + 1, Capacity);
++        }
++    }
++
++    public IReadOnlyList<WorkOrderDelayFeatures> Snapshot()
++    {
++        lock (_lock)
++        {
++            if (_count == 0)
++            {
++                return [];
++            }
++
++            // 緩衝區未寫滿時，資料從索引 0 開始連續排列；寫滿之後 _nextIndex
++            // 就是最舊那筆的位置（下一次要覆蓋的地方），依此還原「由舊到新」的順序。
++            var startIndex = _count < Capacity ? 0 : _nextIndex;
++            var result = new List<WorkOrderDelayFeatures>(_count);
++
++            for (var i = 0; i < _count; i++)
++            {
++                result.Add(_buffer[(startIndex + i) % Capacity]!);
++            }
++
++            return result;
++        }
++    }
++}
+diff --git a/src/Erp.Infrastructure/Ml/OnnxDelayRiskModel.cs b/src/Erp.Infrastructure/Ml/OnnxDelayRiskModel.cs
+index cfca4ac..0d046c7 100644
+--- a/src/Erp.Infrastructure/Ml/OnnxDelayRiskModel.cs
++++ b/src/Erp.Infrastructure/Ml/OnnxDelayRiskModel.cs
+@@ -1,3 +1,4 @@
++using System.Security.Cryptography;
+ using System.Text.Json;
+ using Erp.Application.Ml;
+ using Microsoft.Extensions.Logging;
+@@ -16,7 +17,16 @@ public sealed record DelayRiskModelMetadata(
+     DelayRiskModelMetrics Metrics,
+     DelayRiskCalibration? Calibration,
+     IReadOnlyDictionary<string, FeatureRange>? FeatureRanges,
+-    IReadOnlyList<GoldenSample> GoldenSamples);
++    IReadOnlyList<GoldenSample> GoldenSamples,
++
++    /// 訓練日期 + 訓練資料雜湊前 8 碼。舊格式（S5 之前訓練的模型）沒有這個欄位，
++    /// 反序列化會得到 null —— 那種情況下版本相關的檢查一律說「無法驗證」，不是「一致」。
++    string? ModelVersion = null,
++
++    /// 模型檔（.onnx）本身的 SHA-256，訓練時算好存進來。
++    /// 用來驗「metadata 與 .onnx 是不是同一次訓練產出的一對」，見
++    /// <see cref="IDelayRiskModel.ArtifactVersionConsistent"/>。
++    string? ModelFileSha256 = null);
+ 
+ /// 訓練時對「要不要做機率校準」的評估結果。
+ ///
+@@ -84,7 +94,14 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
+ 
+         try
+         {
+-            _session = new InferenceSession(modelPath);
++            // 讀 bytes 而不是直接用路徑建 InferenceSession：兩個理由都要，
++            // 一是要算這個檔案本身的雜湊去比對 metadata 記的 model_file_sha256
++            // （見下方 ArtifactVersionConsistent），二是雜湊要對「實際載進來的內容」算，
++            // 不能對路徑算 —— 檔案在磁碟上被換掉但路徑沒變的情況才是這個檢查真正要抓的。
++            var modelBytes = File.ReadAllBytes(modelPath);
++            var actualModelSha256 = Convert.ToHexStringLower(SHA256.HashData(modelBytes));
++
++            _session = new InferenceSession(modelBytes);
+             _inputName = _session.InputMetadata.Keys.First();
+ 
+             Metadata = File.Exists(metadataPath)
+@@ -93,14 +110,41 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
+                     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
+                 : null;
+ 
++            ModelVersion = Metadata?.ModelVersion;
++
++            // 沒有 metadata、或 metadata 是 S5 之前的舊格式（沒有 ModelFileSha256）時，
++            // 這個檢查無從驗證 —— 一律當作「不一致」，而不是預設放行：
++            // 「驗不了」跟「驗過了沒問題」是兩件事，後者才能講「一致」。
++            ArtifactVersionConsistent =
++                Metadata?.ModelFileSha256 is { Length: > 0 } expectedSha256
++                && string.Equals(expectedSha256, actualModelSha256, StringComparison.OrdinalIgnoreCase);
++
++            var versionNote = ArtifactVersionConsistent
++                ? $"版本 {ModelVersion}"
++                : Metadata?.ModelFileSha256 is null
++                    ? "版本：無法驗證（metadata 是 S5 之前的舊格式，沒有 model_file_sha256）"
++                    : "**版本：模型檔與 metadata 對不上**（.onnx 的實際雜湊與 metadata 記錄的不一致，"
++                      + "八成是部署時只更新了其中一個檔案）";
++
+             Description = Metadata is null
+                 ? "已載入模型，但沒有 metadata"
+-                : $"logistic regression，訓練於 {Metadata.TrainedOn}，"
++                : $"logistic regression，{versionNote}，訓練於 {Metadata.TrainedOn}，"
+                   + $"資料：{Metadata.DataSource}，樣本 {Metadata.RowsTotal} 筆，"
+                   + $"ROC AUC {Metadata.Metrics.RocAuc:F4}，"
+                   + $"決策閾值 {Metadata.Metrics.Threshold:F2}"
+                   + $"（precision {Metadata.Metrics.PrecisionAtThreshold:F4}、"
+                   + $"recall {Metadata.Metrics.RecallAtThreshold:F4}）";
++
++            if (Metadata is not null && !ArtifactVersionConsistent)
++            {
++                logger.LogWarning(
++                    "延遲風險模型的檔案與 metadata 對不上版本（模型版本 {ModelVersion}）："
++                    + "{Note}", ModelVersion, versionNote);
++            }
++            else
++            {
++                logger.LogInformation("延遲風險模型已載入，版本 {ModelVersion}", ModelVersion ?? "(無)");
++            }
+         }
+         catch (Exception ex) when (ex is OnnxRuntimeException or JsonException or IOException)
+         {
+@@ -127,6 +171,10 @@ public sealed class OnnxDelayRiskModel : IDelayRiskModel, IDisposable
+     /// 只是多一層沒有證據支持的加工。詳見 metadata 的 calibration.decision。
+     public bool IsCalibrated => Metadata?.Calibration?.Applied is not null;
+ 
++    public string? ModelVersion { get; } = null;
++
++    public bool ArtifactVersionConsistent { get; } = false;
++
+     public double PredictDelayProbability(WorkOrderDelayFeatures features)
+     {
+         if (_session is null)
+diff --git a/src/Erp.Infrastructure/Ml/work-order-delay-model.json b/src/Erp.Infrastructure/Ml/work-order-delay-model.json
+index 824bfa2..381bb17 100644
+--- a/src/Erp.Infrastructure/Ml/work-order-delay-model.json
++++ b/src/Erp.Infrastructure/Ml/work-order-delay-model.json
+@@ -1,5 +1,8 @@
+ {
+   "trained_on": "2026-09-16",
++  "model_version": "2026-09-16-eacc007a",
++  "data_sha256": "eacc007a52d24a4028048624e335041110421ff3a07e79f0e32932f6489a6676",
++  "model_file_sha256": "4730602ad2e2a1c64c184e0e8947512e01189791deb86fcdcb38fa8b54205579",
+   "data_source": "模擬資料（HistoricalWorkOrderGenerator，seed=20260913），非真實產線資料",
+   "rows_total": 1200,
+   "rows_train": 900,
+diff --git a/tests/Erp.Application.Tests/Fakes/FakeDelayRiskModel.cs b/tests/Erp.Application.Tests/Fakes/FakeDelayRiskModel.cs
+index 14bdc7e..4a5e7aa 100644
+--- a/tests/Erp.Application.Tests/Fakes/FakeDelayRiskModel.cs
++++ b/tests/Erp.Application.Tests/Fakes/FakeDelayRiskModel.cs
+@@ -22,6 +22,10 @@ public sealed class FakeDelayRiskModel(
+ 
+     public bool IsCalibrated => false;
+ 
++    public string? ModelVersion => "測試版本";
++
++    public bool ArtifactVersionConsistent => true;
++
+     public double PredictDelayProbability(WorkOrderDelayFeatures features)
+     {
+         if (!IsAvailable)

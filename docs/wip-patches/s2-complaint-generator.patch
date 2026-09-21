@@ -1,0 +1,655 @@
+diff --git a/src/Erp.Application/Ml/ComplaintGenerator.cs b/src/Erp.Application/Ml/ComplaintGenerator.cs
+new file mode 100644
+index 0000000..1d465ea
+--- /dev/null
++++ b/src/Erp.Application/Ml/ComplaintGenerator.cs
+@@ -0,0 +1,403 @@
++namespace Erp.Application.Ml;
++
++/// 一筆模擬的客訴紀錄：文本 + 多標籤（一則客訴可能同時命中多個分類）。
++///
++/// 手動覆寫 Equals/GetHashCode：record 預設的欄位比較對 Labels（清單型別）是參考相等，
++/// 兩份內容一樣但是不同 List 實例的資料會被判定「不相等」——這會讓「同一個種子產生
++/// 完全一樣的資料」這條可重現性測試失去意義。改成逐一比較清單內容。
++public sealed record ComplaintRecord(string ComplaintNo, string Text, IReadOnlyList<string> Labels)
++{
++    public bool Equals(ComplaintRecord? other) =>
++        other is not null
++        && ComplaintNo == other.ComplaintNo
++        && Text == other.Text
++        && Labels.SequenceEqual(other.Labels);
++
++    public override int GetHashCode() => HashCode.Combine(ComplaintNo, Text, Labels.Count);
++}
++
++/// 產生訓練用的模擬客訴文本，多標籤分類（品質-外觀／品質-功能／交期／包裝／服務態度／其他）。
++///
++/// **這是模擬資料，不是真實客訴紀錄。** 理由與 <see cref="HistoricalWorkOrderGenerator"/> 相同：
++/// 這裡示範的是「資料生成 → 清理 → 訓練 → 評估」整條鏈路走得通，不是宣稱模型對真實客訴有效。
++///
++/// 與既有 RAG 故事世界共用同一批背景設定（見 <c>DemoCorpus</c> 的兩份客訴紀錄）：
++/// TV-100／MON-200 機種、PANEL-01 面板、SUP-008 供應商、面板色偏、訊號線接觸不良、
++/// 貼合機（EQ-LAM-01）、自動鎖螺絲機（EQ-SCR-02）。合成客訴的用詞刻意對齊這些既有設定，
++/// 讓 RAG 示範與這個分類模型看起來像同一家工廠的真實資料，而不是兩套互不相干的假資料。
++///
++/// 為什麼寫在 C# 而不是 Python：與工單延遲生成器同一個理由 —— 標籤定義只能有一份。
++/// 這裡的六個標籤字串（品質-外觀／品質-功能／交期／包裝／服務態度／其他）就是唯一真相，
++/// 訓練腳本與線上推論都照抄 <see cref="AllLabels"/>，不會有兩邊標籤集合對不齊的問題。
++///
++/// 標籤生成規則（多標籤）：
++///   1. 先以加權隨機選出「主要標籤」（<see cref="PrimaryWeights"/>），
++///      權重刻意做成長尾：服務態度約 4%、包裝約 8%，其餘較多。
++///      長尾是這個模組的重點 —— 全部均勻分布的話，模型全猜多數類也會有高準確率，
++///      macro-F1 才是唯一能戳穿這種假象的指標。
++///   2. 25% 機率依「主要標籤 → 常見共伴標籤」的對照表加一個次要標籤
++///      （例如交期延遲常常伴隨服務態度抱怨，外觀瑕疵常常伴隨功能異常），
++///      這是多標籤樣本的主要來源，也讓標籤共現符合現實直覺，不是隨機亂配。
++///   3. 5% 機率再加第三個標籤（少見但不是不可能：一次客訴同時踩到三個問題）。
++///
++/// 刻意注入的雜訊，每一項都對應一個現實情境：
++///   - 同義改寫：每個標籤準備多組句式，隨機挑選，避免同一標籤永遠長同一個樣子。
++///   - 錯別字/口語（<see cref="ApplyTypo"/>）：現場填單用注音輸入法連點造成的疊字，
++///     以及「的/得」「在/再」「面板/面版」這類常見同音誤植。
++///   - 5% 標籤雜訊：客服人工標註時漏標或多標一個分類 —— 標註品質本身就不是完美的，
++///     模型評估如果假設標籤全對，macro-F1 會虛高於真實部署後的表現。
++///   - 5% 極短文本：像「東西壞了」這種沒有資訊量的短句 —— 標籤其實是客服依電話
++///     談話內容另外判定的，文本本身推不出標籤。這一批樣本刻意留著，逼分類器
++///     承認「這幾筆真的學不到」，而不是把資料洗到只剩好學的樣本。
++///
++/// 亂數種子固定，所以同一個 seed 產生的資料完全一樣 —— clone 下來能訓練出同一個模型。
++public sealed class ComplaintGenerator(int seed = 20260916)
++{
++    private readonly Random _random = new(seed);
++
++    public const string LabelAppearance = "品質-外觀";
++    public const string LabelFunction = "品質-功能";
++    public const string LabelDelivery = "交期";
++    public const string LabelPackaging = "包裝";
++    public const string LabelAttitude = "服務態度";
++    public const string LabelOther = "其他";
++
++    public static readonly IReadOnlyList<string> AllLabels =
++        [LabelAppearance, LabelFunction, LabelDelivery, LabelPackaging, LabelAttitude, LabelOther];
++
++    /// 主要標籤的加權分布。服務態度與包裝刻意壓低，做出長尾。
++    /// 這裡的權重不是目標比例本身 —— 次要/第三標籤的共伴機制會再往長尾類別加一些樣本，
++    /// 所以權重比目標比例低一截；實際比例以 tools/Erp.MlDataGen 印出的統計為準。
++    private static readonly (string Label, double Weight)[] PrimaryWeights =
++    [
++        (LabelAppearance, 30),
++        (LabelFunction, 34),
++        (LabelDelivery, 19),
++        (LabelPackaging, 4),
++        (LabelAttitude, 1),
++        (LabelOther, 8)
++    ];
++
++    /// 主要標籤 → 常見共伴標籤的加權對照表。權重是憑經驗設計的「哪些抱怨常常一起出現」，
++    /// 不是統計出來的，這點在文件裡誠實標明。
++    private static readonly Dictionary<string, (string Label, double Weight)[]> CoOccurrence = new()
++    {
++        [LabelAppearance] = [(LabelFunction, 45), (LabelPackaging, 15), (LabelDelivery, 15)],
++        [LabelFunction] = [(LabelAppearance, 45), (LabelDelivery, 25), (LabelAttitude, 3)],
++        [LabelDelivery] = [(LabelAttitude, 8), (LabelFunction, 25), (LabelAppearance, 20)],
++        [LabelPackaging] = [(LabelAppearance, 55), (LabelFunction, 15), (LabelDelivery, 15)],
++        [LabelAttitude] = [(LabelDelivery, 40), (LabelFunction, 25)]
++    };
++
++    private static readonly Dictionary<string, string[]> PhraseBank = new()
++    {
++        [LabelAppearance] =
++        [
++            "面板看起來偏黃，跟展示機的顏色不一樣",
++            "螢幕四個角有壓痕，像是運送途中被壓到的",
++            "外殼有明顯刮痕，看起來像是二手品",
++            "面板色偏很明顯，在燈光下特別偏藍",
++            "機身表面有霧狀髒污，怎麼擦都擦不掉",
++            "邊框接縫對不齊，一邊比較寬一邊比較窄",
++            "面板上有一小塊壓痕，正面看得很清楚",
++            "外殼顏色跟圖片上差很多，感覺根本是瑕疵品",
++            "螢幕邊緣有一圈色差，正面看很明顯",
++            "機身正面有指紋狀的髒污，像是組裝時留下的",
++            "面板四個角落亮度不一致，左邊比右邊暗一截",
++            "外殼接合處有毛邊，摸起來刮手",
++            "螢幕表面有一條細細的刮痕，燈光照過去才看得到",
++            "顏色跟官網照片落差很大，感覺根本不是同一款"
++        ],
++        [LabelFunction] =
++        [
++            "開機後畫面會間歇閃爍，搖一下機身症狀更明顯",
++            "用了兩天就完全無法開機",
++            "聲音時有時無，插著訊號線會有雜訊",
++            "遙控器對不到機器，反應非常慢",
++            "畫面偶爾會整個黑掉，過一陣子又自己恢復",
++            "機殼裡面有異音，搬動的時候會有鬆動聲",
++            "收不到訊號源，換了好幾條線都一樣",
++            "開機十幾分鐘後畫面會自動關掉",
++            "訊號時常中斷，要重新插拔線材才會恢復",
++            "開機需要按好幾次才會有反應",
++            "畫面偶爾出現色塊雜訊，過幾秒才消失",
++            "搬動的時候聽得到裡面有東西在晃",
++            "用不到一週就完全沒有畫面",
++            "音量鈕壞了，怎麼調都沒有反應"
++        ],
++        [LabelDelivery] =
++        [
++            "下單三週了還沒收到貨",
++            "官網寫七天到貨，結果拖了快一個月",
++            "客服說會延遲出貨，但完全沒有主動通知",
++            "訂購時承諾的到貨日一直跳票",
++            "到貨時間比訂單頁面寫的晚了兩週",
++            "出貨進度一直顯示備貨中，問了才說缺貨",
++            "說好的到貨日過了三天還是沒有動靜",
++            "物流狀態卡在同一個地方超過一週沒有更新",
++            "訂單顯示已出貨，但實際上貨還沒動",
++            "分兩批出貨也沒有事先說明，等於等了兩次",
++            "急件加價還是延遲，完全沒有達到承諾的時效",
++            "訂購頁面寫現貨，結果變成預購還要再等三週"
++        ],
++        [LabelPackaging] =
++        [
++            "外箱嚴重凹陷，打開來產品也有磕到的痕跡",
++            "包裝內的保護泡棉少了一角，機器直接碰到紙箱",
++            "收到的箱子是濕的，說明書都糊掉了",
++            "包裝膠帶隨便黏一下，箱子運送途中整個開了",
++            "外箱破了一個洞，裡面的保護袋也跟著破了",
++            "紙箱明顯被重壓過，裡面的保麗龍碎了一地",
++            "配件用塑膠袋隨便裝一裝，說明書都皺掉了",
++            "外箱上貼滿別家的舊標籤，看起來像二次包裝的退貨品",
++            "緩衝材完全不夠，機器在箱子裡晃來晃去"
++        ],
++        [LabelAttitude] =
++        [
++            "客服講電話態度很差，一直打斷客人說話",
++            "反映問題的時候客服語氣很不耐煩",
++            "門市人員愛理不理，問問題愛答不答",
++            "客服一直互踢皮球，沒有人願意處理",
++            "打了好幾次客服電話，每次都被敷衍過去",
++            "線上客服已讀不回，等了兩天才有人回覆",
++            "客服講話很兇，感覺是客人的錯",
++            "反應問題被客服反過來質疑是自己使用不當"
++        ],
++        [LabelOther] =
++        [
++            "包裝上的標籤跟說明書內容對不起來，不確定是不是正貨",
++            "收到的贈品跟活動頁面寫的不一樣",
++            "發票開立的品名跟實際購買的型號不符",
++            "官網顯示的規格跟實際收到的不一樣",
++            "保固卡上的日期跟實際購買日對不起來",
++            "收到的配件數量比說明書上寫的少一件"
++        ]
++    };
++
++    /// 通用細節句，跟標籤無關，純粹增加文本多樣性 —— 現實中的客訴常常會多補一句
++    /// 抱怨的來龍去脈或情緒，這句話跟分類無關，模型不該把它當成訊號。
++    private static readonly string[] DetailClauses =
++    [
++        "已經是第二次發生類似的狀況了",
++        "身邊朋友知道了都說不敢買這牌子",
++        "訂購前特地查過評價才下單，結果還是踩雷",
++        "當初就是看中這個型號才特地買的，很失望",
++        "已經跟客服反應過，但到現在都沒有下文",
++        "本來想推薦給家人，現在完全打消念頭",
++        "第一次遇到這種狀況，不知道是不是個案"
++    ];
++
++    /// 5% 極短文本的候選池。刻意準備夠多組（並可另外接上機型前綴），
++    /// 避免這批「沒資訊量」的樣本本身又重複到失真。
++    private static readonly string[] ShortTexts =
++    [
++        "東西壞了", "不能用", "有問題", "品質很差", "故障了", "壞掉了",
++        "不滿意", "要退貨", "太扯了", "很失望", "超雷", "踩雷了",
++        "要退錢", "這什麼東西", "品質不行", "一直出問題", "根本不能用",
++        "很爛", "沒有想像中好", "落差很大"
++    ];
++
++    private static readonly string[] ProductPrefixes = ["TV-100", "MON-200", ""];
++
++    private static readonly string[] Openings =
++    [
++        "我買的 {0}", "我上週收到的 {0}", "我訂購的 {0}", "這台 {0}", "家裡新買的 {0}"
++    ];
++
++    private static readonly string[] GenericOpenings = ["我買的這台", "收到的商品", "上個月訂的這台", "這次收到的東西"];
++
++    private static readonly string[] Connectors = ["，而且", "，另外", "，還有", "。而且", "。另外", "，加上", "。除此之外"];
++
++    private static readonly string[] DemandSuffixes =
++    [
++        "希望能換貨。", "要求退款。", "請盡快處理。", "希望公司給個說法。",
++        "真的很失望，考慮以後不再回購。", "希望能有人主動聯絡說明。", "麻煩盡快回覆處理進度。"
++    ];
++
++    /// 同音誤植對照表：現場填單常見的錯別字，不是隨機亂碼。
++    private static readonly (string From, string To)[] Homophones =
++    [
++        ("的", "得"), ("在", "再"), ("面板", "面版")
++    ];
++
++    public IReadOnlyList<ComplaintRecord> Generate(int count = 1500)
++    {
++        var records = new List<ComplaintRecord>(count);
++
++        for (var i = 0; i < count; i++)
++        {
++            var labels = PickLabels();
++            var text = BuildText(labels);
++
++            // 標籤雜訊：人工標註漏標或多標一個分類
++            if (_random.NextDouble() < 0.05)
++            {
++                labels = ApplyLabelNoise(labels);
++            }
++
++            // 極短文本：文字本身沒資訊量，標籤是依電話備註另外判定的
++            if (_random.NextDouble() < 0.05)
++            {
++                var prefix = ProductPrefixes[_random.Next(ProductPrefixes.Length)];
++                var shortText = ShortTexts[_random.Next(ShortTexts.Length)];
++                text = string.IsNullOrEmpty(prefix) ? shortText : $"{prefix}，{shortText}";
++            }
++
++            records.Add(new ComplaintRecord($"CS-{i + 1:D5}", text, labels));
++        }
++
++        return records;
++    }
++
++    private List<string> PickLabels()
++    {
++        var primary = WeightedPick(_random, PrimaryWeights);
++        var labels = new List<string> { primary };
++
++        if (primary != LabelOther && _random.NextDouble() < 0.25)
++        {
++            var secondary = WeightedPick(_random, CoOccurrence[primary]);
++            if (!labels.Contains(secondary))
++            {
++                labels.Add(secondary);
++            }
++        }
++
++        if (labels.Count > 1 && _random.NextDouble() < 0.05)
++        {
++            var candidates = AllLabels.Where(l => l != LabelOther && !labels.Contains(l)).ToArray();
++            labels.Add(candidates[_random.Next(candidates.Length)]);
++        }
++
++        return labels;
++    }
++
++    /// 漏標或多標各佔一半：標籤數大於 1 時優先示範漏標，否則多標一個不存在的分類。
++    private List<string> ApplyLabelNoise(List<string> labels)
++    {
++        if (labels.Count > 1 && _random.NextDouble() < 0.5)
++        {
++            labels.RemoveAt(_random.Next(labels.Count));
++            return labels;
++        }
++
++        var candidates = AllLabels.Where(l => !labels.Contains(l)).ToArray();
++        if (candidates.Length > 0)
++        {
++            labels.Add(candidates[_random.Next(candidates.Length)]);
++        }
++
++        return labels;
++    }
++
++    private string BuildText(IReadOnlyList<string> labels)
++    {
++        var opening = BuildOpening(_random);
++        var sb = new System.Text.StringBuilder(opening);
++
++        for (var i = 0; i < labels.Count; i++)
++        {
++            var phrase = ApplyTypo(PickPhrase(labels[i], _random), _random);
++            sb.Append(i == 0 ? "，" : Connectors[_random.Next(Connectors.Length)]);
++            sb.Append(phrase);
++        }
++
++        // 通用細節句：與標籤無關的軸，純粹拉開文本組合空間，避免同標籤組合的樣本
++        // 只靠句式模板就能被模型記憶起來
++        if (_random.NextDouble() < 0.35)
++        {
++            sb.Append('，');
++            sb.Append(DetailClauses[_random.Next(DetailClauses.Length)]);
++        }
++
++        sb.Append('。');
++
++        if (_random.NextDouble() < 0.4)
++        {
++            sb.Append(DemandSuffixes[_random.Next(DemandSuffixes.Length)]);
++        }
++
++        return sb.ToString();
++    }
++
++    private static string BuildOpening(Random random)
++    {
++        var product = ProductPrefixes[random.Next(ProductPrefixes.Length)];
++        if (string.IsNullOrEmpty(product))
++        {
++            return GenericOpenings[random.Next(GenericOpenings.Length)];
++        }
++
++        var template = Openings[random.Next(Openings.Length)];
++        return string.Format(template, product);
++    }
++
++    private static string PickPhrase(string label, Random random)
++    {
++        var pool = PhraseBank[label];
++        return pool[random.Next(pool.Length)];
++    }
++
++    /// 錯別字/口語注入：疊字模擬輸入法連點，同音字替換模擬手誤。
++    /// 兩者互不排斥，同一句可能同時中兩種雜訊。
++    private static string ApplyTypo(string text, Random random)
++    {
++        if (random.NextDouble() < 0.12 && text.Length > 2)
++        {
++            var pos = random.Next(text.Length);
++            text = text.Insert(pos, text[pos].ToString());
++        }
++
++        foreach (var (from, to) in Homophones)
++        {
++            if (random.NextDouble() < 0.08 && text.Contains(from, StringComparison.Ordinal))
++            {
++                var index = text.IndexOf(from, StringComparison.Ordinal);
++                text = string.Concat(text.AsSpan(0, index), to, text.AsSpan(index + from.Length));
++                break;
++            }
++        }
++
++        return text;
++    }
++
++    private static string WeightedPick(Random random, (string Label, double Weight)[] pool)
++    {
++        var total = pool.Sum(p => p.Weight);
++        var roll = random.NextDouble() * total;
++        var cumulative = 0.0;
++
++        foreach (var (label, weight) in pool)
++        {
++            cumulative += weight;
++            if (roll < cumulative)
++            {
++                return label;
++            }
++        }
++
++        return pool[^1].Label;
++    }
++
++    /// 輸出成 CSV，labels 欄位用 `|` 分隔多標籤。文本裡若含逗號、引號或換行，
++    /// 依 CSV 慣例用雙引號包住並把內部雙引號跳脫成兩個雙引號。
++    public static string ToCsv(IReadOnlyList<ComplaintRecord> records)
++    {
++        var lines = new List<string>(records.Count + 1) { "text,labels" };
++
++        lines.AddRange(records.Select(r =>
++            string.Join(",", CsvField(r.Text), CsvField(string.Join("|", r.Labels)))));
++
++        return string.Join("\n", lines) + "\n";
++    }
++
++    private static string CsvField(string value)
++    {
++        if (value.IndexOfAny(['"', ',', '\n', '\r']) < 0)
++        {
++            return value;
++        }
++
++        return "\"" + value.Replace("\"", "\"\"") + "\"";
++    }
++}
+diff --git a/tests/Erp.Application.Tests/ComplaintGeneratorTests.cs b/tests/Erp.Application.Tests/ComplaintGeneratorTests.cs
+new file mode 100644
+index 0000000..de83049
+--- /dev/null
++++ b/tests/Erp.Application.Tests/ComplaintGeneratorTests.cs
+@@ -0,0 +1,135 @@
++using Erp.Application.Ml;
++
++namespace Erp.Application.Tests;
++
++/// 客訴多標籤合成資料生成器。
++///
++/// 驗的不是「文本像不像真的客訴」（那沒有客觀標準），而是四件會讓後續訓練與評估
++/// 整個失去意義的事：可重現、長尾類別真的稀少但不是零、標籤雜訊真的加進去了、
++/// 文本沒有重複到模型靠記憶就能答對。
++public class ComplaintGeneratorTests
++{
++    [Fact]
++    public void 同一個種子產生完全一樣的資料()
++    {
++        // 「評審 clone 下來能訓練出同一個模型」的前提，與工單延遲生成器同理
++        var first = new ComplaintGenerator(42).Generate(300);
++        var second = new ComplaintGenerator(42).Generate(300);
++
++        Assert.Equal(first, second);
++    }
++
++    [Fact]
++    public void 不同種子產生不同資料()
++    {
++        var first = new ComplaintGenerator(1).Generate(300);
++        var second = new ComplaintGenerator(2).Generate(300);
++
++        Assert.NotEqual(first, second);
++    }
++
++    [Fact]
++    public void 長尾類別稀少但不是零()
++    {
++        // 服務態度約 4%、包裝約 8%，刻意做出長尾；主力類別（品質-功能）要明顯多於它們，
++        // 否則全部均勻分布，macro-F1 就測不出「模型在長尾類別學得好不好」這件事
++        var records = new ComplaintGenerator().Generate(1500);
++
++        var attitude = records.Count(r => r.Labels.Contains(ComplaintGenerator.LabelAttitude));
++        var packaging = records.Count(r => r.Labels.Contains(ComplaintGenerator.LabelPackaging));
++        var function = records.Count(r => r.Labels.Contains(ComplaintGenerator.LabelFunction));
++
++        var attitudeRate = attitude / (double)records.Count;
++        var packagingRate = packaging / (double)records.Count;
++
++        Assert.InRange(attitudeRate, 0.01, 0.08);
++        Assert.InRange(packagingRate, 0.03, 0.15);
++        Assert.True(attitude > 0, "長尾類別不能是零筆，否則模型連學的機會都沒有");
++        Assert.True(packaging > 0);
++        Assert.True(attitude < function, "長尾類別的樣本數必須明顯少於主力類別（品質-功能）");
++        Assert.True(packaging < function);
++    }
++
++    [Fact]
++    public void 多標籤樣本確實存在()
++    {
++        // 一則客訴可能同時命中多個分類，這是多標籤分類問題的前提；
++        // 如果生成器其實每筆只給一個標籤，訓練腳本裡的多標籤損失函數就是在處理不存在的情境
++        var records = new ComplaintGenerator().Generate(1500);
++        var multiLabel = records.Count(r => r.Labels.Count > 1);
++        var rate = multiLabel / (double)records.Count;
++
++        Assert.True(multiLabel > 0, "多標籤樣本不能是零筆");
++        Assert.InRange(rate, 0.15, 0.4);
++    }
++
++    [Fact]
++    public void 標籤雜訊比例在設計值附近()
++    {
++        // 「其他」在設計上不會透過主要／次要／第三標籤機制跟任何其他標籤同時出現
++        // （PickLabels 的共伴表與第三標籤候選都明確排除「其他」）。
++        // 所以「其他」跟別的標籤一起出現，只可能來自 5% 標籤雜訊裡的「多標」分支。
++        // 用這個訊號回推雜訊比例落在設計值附近 —— 樣本數拉大到兩萬筆讓比例估計穩定一點。
++        var records = new ComplaintGenerator(777).Generate(20000);
++        var contaminated = records.Count(r =>
++            r.Labels.Contains(ComplaintGenerator.LabelOther) && r.Labels.Count > 1);
++        var rate = contaminated / (double)records.Count;
++
++        Assert.InRange(rate, 0.003, 0.03);
++    }
++
++    [Fact]
++    public void 文本重複率低於門檻()
++    {
++        // 同一標籤組合下如果文本長得一模一樣，模型靠記憶字串就能答對，
++        // macro-F1 會虛高，測不出真正的語意分類能力
++        var records = new ComplaintGenerator().Generate(1500);
++        var distinctCount = records.Select(r => r.Text).Distinct().Count();
++        var duplicateRate = 1 - (distinctCount / (double)records.Count);
++
++        Assert.True(duplicateRate < 0.15, $"文本重複率 {duplicateRate:P1} 超過門檻");
++    }
++
++    [Fact]
++    public void 每個標籤都有對應到明確的字串常數()
++    {
++        // 標籤集合的唯一真相是 AllLabels，訓練腳本與線上推論都照抄這份清單
++        Assert.Equal(6, ComplaintGenerator.AllLabels.Count);
++        Assert.Contains(ComplaintGenerator.LabelAppearance, ComplaintGenerator.AllLabels);
++        Assert.Contains(ComplaintGenerator.LabelFunction, ComplaintGenerator.AllLabels);
++        Assert.Contains(ComplaintGenerator.LabelDelivery, ComplaintGenerator.AllLabels);
++        Assert.Contains(ComplaintGenerator.LabelPackaging, ComplaintGenerator.AllLabels);
++        Assert.Contains(ComplaintGenerator.LabelAttitude, ComplaintGenerator.AllLabels);
++        Assert.Contains(ComplaintGenerator.LabelOther, ComplaintGenerator.AllLabels);
++    }
++
++    [Fact]
++    public void CSV欄位是text與labels而且標籤用直線分隔()
++    {
++        // 用夠大的筆數確保至少有一筆多標籤樣本，不依賴只抽 3 筆時的運氣
++        var records = new ComplaintGenerator().Generate(200);
++        var csv = ComplaintGenerator.ToCsv(records);
++        var lines = csv.Split('\n');
++
++        Assert.Equal("text,labels", lines[0]);
++        Assert.Contains(records, r => r.Labels.Count > 1);
++
++        var multiLabelRecord = records.First(r => r.Labels.Count > 1);
++        Assert.Contains(string.Join("|", multiLabelRecord.Labels), csv);
++    }
++
++    [Fact]
++    public void CSV正確處理文本裡的逗號與引號()
++    {
++        var record = new ComplaintRecord(
++            "CS-00001",
++            "面板有,裂痕\"還有\"色偏",
++            [ComplaintGenerator.LabelAppearance, ComplaintGenerator.LabelFunction]);
++
++        var csv = ComplaintGenerator.ToCsv([record]);
++        var lines = csv.Split('\n');
++
++        Assert.Equal("text,labels", lines[0]);
++        Assert.Equal("\"面板有,裂痕\"\"還有\"\"色偏\",品質-外觀|品質-功能", lines[1]);
++    }
++}
+diff --git a/tools/Erp.MlDataGen/Program.cs b/tools/Erp.MlDataGen/Program.cs
+index a4e8027..ade35da 100644
+--- a/tools/Erp.MlDataGen/Program.cs
++++ b/tools/Erp.MlDataGen/Program.cs
+@@ -1,33 +1,79 @@
+ using Erp.Application.Ml;
+ 
+-// 產生訓練用的模擬歷史工單 CSV。
++// 產生訓練用的模擬資料 CSV。
+ //
+-// 為什麼資料生成寫在 C# 而不是訓練腳本裡：特徵定義必須只有一份。
+-// 由 Python 生成的話，「齊套率」會有兩個實作 —— 一個在訓練腳本、一個在線上推論 ——
++// 為什麼資料生成寫在 C# 而不是訓練腳本裡：特徵/標籤定義必須只有一份。
++// 由 Python 生成的話，欄位或標籤集合會有兩個實作 —— 一個在訓練腳本、一個在線上推論 ——
+ // 而兩邊差一點點就是 training/serving skew，模型上線後表現與離線評估對不上，
+-// 還很難查。這裡輸出的欄位順序直接來自 WorkOrderDelayFeatures.FeatureNames。
++// 還很難查。
+ //
+-// 用法：dotnet run --project tools/Erp.MlDataGen -- [輸出路徑] [筆數] [亂數種子]
++// 用法：
++//   工單延遲（預設）：dotnet run --project tools/Erp.MlDataGen -- [輸出路徑] [筆數] [亂數種子]
++//   客訴多標籤分類：  dotnet run --project tools/Erp.MlDataGen -- complaints [輸出路徑] [筆數] [亂數種子]
+ 
+-var outputPath = args.Length > 0 ? args[0] : "ml/data/work-order-history.csv";
+-var count = args.Length > 1 ? int.Parse(args[1]) : 1200;
+-var seed = args.Length > 2 ? int.Parse(args[2]) : 20260913;
+-
+-var records = new HistoricalWorkOrderGenerator(seed).Generate(count);
++if (args.Length > 0 && args[0] == "complaints")
++{
++    RunComplaintGenerator(args.Skip(1).ToArray());
++}
++else
++{
++    await RunWorkOrderGenerator(args);
++}
+ 
+-var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+-if (!string.IsNullOrEmpty(directory))
++static async Task RunWorkOrderGenerator(string[] args)
+ {
+-    Directory.CreateDirectory(directory);
++    var outputPath = args.Length > 0 ? args[0] : "ml/data/work-order-history.csv";
++    var count = args.Length > 1 ? int.Parse(args[1]) : 1200;
++    var seed = args.Length > 2 ? int.Parse(args[2]) : 20260913;
++
++    var records = new HistoricalWorkOrderGenerator(seed).Generate(count);
++
++    var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
++    if (!string.IsNullOrEmpty(directory))
++    {
++        Directory.CreateDirectory(directory);
++    }
++
++    await File.WriteAllTextAsync(outputPath, HistoricalWorkOrderGenerator.ToCsv(records));
++
++    var delayed = records.Count(r => r.WasDelayed);
++    var missingReadiness = records.Count(r => r.MaterialReadiness is null);
++    var missingLoad = records.Count(r => r.WeeklyLoadRatio is null);
++
++    Console.WriteLine($"已寫出 {records.Count} 筆到 {outputPath}（seed={seed}）");
++    Console.WriteLine($"  延遲比例：{delayed}/{records.Count} = {delayed / (double)records.Count:P1}");
++    Console.WriteLine($"  齊套率缺值：{missingReadiness} 筆");
++    Console.WriteLine($"  當週負載缺值：{missingLoad} 筆");
+ }
+ 
+-await File.WriteAllTextAsync(outputPath, HistoricalWorkOrderGenerator.ToCsv(records));
++static void RunComplaintGenerator(string[] args)
++{
++    var outputPath = args.Length > 0 ? args[0] : "ml/data/complaints.csv";
++    var count = args.Length > 1 ? int.Parse(args[1]) : 1500;
++    var seed = args.Length > 2 ? int.Parse(args[2]) : 20260916;
++
++    var records = new ComplaintGenerator(seed).Generate(count);
++
++    var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
++    if (!string.IsNullOrEmpty(directory))
++    {
++        Directory.CreateDirectory(directory);
++    }
+ 
+-var delayed = records.Count(r => r.WasDelayed);
+-var missingReadiness = records.Count(r => r.MaterialReadiness is null);
+-var missingLoad = records.Count(r => r.WeeklyLoadRatio is null);
++    File.WriteAllText(outputPath, ComplaintGenerator.ToCsv(records));
+ 
+-Console.WriteLine($"已寫出 {records.Count} 筆到 {outputPath}（seed={seed}）");
+-Console.WriteLine($"  延遲比例：{delayed}/{records.Count} = {delayed / (double)records.Count:P1}");
+-Console.WriteLine($"  齊套率缺值：{missingReadiness} 筆");
+-Console.WriteLine($"  當週負載缺值：{missingLoad} 筆");
++    Console.WriteLine($"已寫出 {records.Count} 筆到 {outputPath}（seed={seed}）");
++
++    foreach (var label in ComplaintGenerator.AllLabels)
++    {
++        var hit = records.Count(r => r.Labels.Contains(label));
++        Console.WriteLine($"  {label}：{hit}/{records.Count} = {hit / (double)records.Count:P1}");
++    }
++
++    var multiLabel = records.Count(r => r.Labels.Count > 1);
++    Console.WriteLine($"  多標籤樣本：{multiLabel}/{records.Count} = {multiLabel / (double)records.Count:P1}");
++
++    var distinctTexts = records.Select(r => r.Text).Distinct().Count();
++    var duplicateRate = 1 - (distinctTexts / (double)records.Count);
++    Console.WriteLine($"  文本重複率：{duplicateRate:P1}（相異文本 {distinctTexts}/{records.Count}）");
++}
